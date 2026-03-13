@@ -332,19 +332,17 @@ function buildPatchCode(v: DiscoveredVars): string {
   const ES = v.composerEventService;
   const VS = v.composerViewsService;
 
-  // Inline helper: showAndFocus then poll for handle (up to 2s)
-  const waitForHandle = [
-    `async(ds,vs,id)=>{`,
-      `await vs.showAndFocus(id);`,
-      `let h=ds.getHandleIfLoaded(id);`,
-      `if(h)return h;`,
-      `for(let w=0;w<2000;w+=50){`,
-        `await new Promise(r=>setTimeout(r,50));`,
-        `h=ds.getHandleIfLoaded(id);`,
-        `if(h)return h;`,
-      `}`,
-      `return null;`,
-    `}`,
+  // Wait-for-handle logic inlined directly in each command to avoid
+  // any arrow-function-in-comma-expression parsing issues.
+  // showAndFocus activates the tab; poll getHandleIfLoaded up to 2s.
+  const waitBlock = (dsVar: string, vsVar: string, idVar: string, hVar: string) => [
+    `await ${vsVar}.showAndFocus(${idVar});`,
+    `var ${hVar}=${dsVar}.getHandleIfLoaded(${idVar});`,
+    `if(!${hVar}){for(var _w=0;_w<40;_w++){`,
+      `await new Promise(function(r){setTimeout(r,50)});`,
+      `${hVar}=${dsVar}.getHandleIfLoaded(${idVar});`,
+      `if(${hVar})break;`,
+    `}}`,
   ].join('');
 
   return [
@@ -352,10 +350,10 @@ function buildPatchCode(v: DiscoveredVars): string {
 
     `${CR}.registerCommand("cursorRemote._submitChat",async(n,e)=>{`,
       `try{`,
-        `const t=e.composerId,i=e.text;`,
+        `var t=e.composerId,i=e.text;`,
         `if(!t||!i)return{ok:false,error:"composerId and text required"};`,
-        `const ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES});`,
-        `const h=await(${waitForHandle})(ds,vs,t);`,
+        `var ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES});`,
+        waitBlock('ds', 'vs', 't', 'h'),
         `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
@@ -370,10 +368,10 @@ function buildPatchCode(v: DiscoveredVars): string {
 
     `${CR}.registerCommand("cursorRemote._setComposerText",async(n,e)=>{`,
       `try{`,
-        `const t=e.composerId,i=e.text;`,
+        `var t=e.composerId,i=e.text;`,
         `if(!t||typeof i!=="string")return{ok:false,error:"composerId and text required"};`,
-        `const ds=n.get(${DS}),es=n.get(${ES}),vs=n.get(${VS});`,
-        `const h=await(${waitForHandle})(ds,vs,t);`,
+        `var ds=n.get(${DS}),es=n.get(${ES}),vs=n.get(${VS});`,
+        waitBlock('ds', 'vs', 't', 'h'),
         `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
@@ -387,15 +385,15 @@ function buildPatchCode(v: DiscoveredVars): string {
 
     `${CR}.registerCommand("cursorRemote._getState",async(n)=>{`,
       `try{`,
-        `const ds=n.get(${DS});`,
-        `const sel=ds.selectedComposerId;`,
-        `const ids=ds.allComposersData.selectedComposerIds||[];`,
-        `const all=(ds.allComposersData.allComposers||[]).map(c=>({`,
+        `var ds=n.get(${DS});`,
+        `var sel=ds.selectedComposerId;`,
+        `var ids=ds.allComposersData.selectedComposerIds||[];`,
+        `var all=(ds.allComposersData.allComposers||[]).map(function(c){return{`,
           `id:c.composerId,`,
           `name:c.name||"",`,
           `status:c.status||"unknown",`,
           `lastUpdated:c.lastUpdatedAt||0`,
-        `}));`,
+        `}});`,
         `return{ok:true,selectedComposerId:sel,openComposerIds:ids,composers:all};`,
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
@@ -415,7 +413,8 @@ function buildPatchCode(v: DiscoveredVars): string {
  */
 function validatePatchSyntax(patchCode: string): string | null {
   try {
-    new vm.Script(`(async function(){0,${patchCode}})`, { filename: 'patch-validation.js' });
+    // patchCode already starts with ',' so we use `0` as a leading expression
+    new vm.Script(`(async function(){0${patchCode}})`, { filename: 'patch-validation.js' });
     return null;
   } catch (err: any) {
     return err.message || String(err);
