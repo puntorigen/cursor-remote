@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.19 — 2026-03-13
+
+### Improved workbench file discovery for Windows
+- `getWorkbenchPath` now uses a multi-strategy approach with candidate search:
+  1. `vscode.env.appRoot` (the running Cursor's own `resources/app` dir)
+  2. Derive from `process.execPath` (Cursor.exe → `resources/app`)
+  3. Platform-specific default paths (multiple candidates on Windows)
+- Tries each candidate path and returns the first one that exists on disk.
+- Added diagnostic logging (appRoot, execPath, resources dir contents) when the file isn't found, to help debug installation-specific issues.
+- Resolves the issue where the workbench file wasn't found on some Windows installations where the Cursor executable location differs from the expected `%LOCALAPPDATA%\Programs\Cursor\` path.
+
 ## v1.0.18 — 2026-03-13
 
 ### Fix patching on Windows

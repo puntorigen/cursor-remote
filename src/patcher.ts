@@ -36,29 +36,75 @@ import * as vscode from 'vscode';
 
 const SENTINEL = '/* __CURSOR_REMOTE_PATCHED__ */';
 
-const WORKBENCH_RELATIVE = 'out/vs/workbench/workbench.desktop.main.js';
+const WORKBENCH_RELATIVE = path.join('out', 'vs', 'workbench', 'workbench.desktop.main.js');
+
+let _resolvedWorkbenchPath: string | undefined;
 
 /**
- * Uses vscode.env.appRoot (the running Cursor's own resources/app dir)
- * so the path is always correct regardless of install location.
- * Falls back to platform-specific defaults if appRoot is empty.
+ * Locates the workbench JS file by trying multiple strategies:
+ *   1. vscode.env.appRoot (the running Cursor's own resources/app dir)
+ *   2. Derive from process.execPath (Cursor.exe → resources/app)
+ *   3. Platform-specific default paths
+ *
+ * Caches the result after the first successful resolution.
  */
 function getWorkbenchPath(): string {
+  if (_resolvedWorkbenchPath) return _resolvedWorkbenchPath;
+
+  const candidates: string[] = [];
+
+  // Strategy 1: vscode.env.appRoot
   const appRoot = vscode.env.appRoot;
   if (appRoot) {
-    return path.join(appRoot, WORKBENCH_RELATIVE);
+    candidates.push(path.join(appRoot, WORKBENCH_RELATIVE));
+    // appRoot may point to resources/app (ASAR virtual) — also try
+    // the parent if it ends with resources/app
+    const stripped = appRoot.replace(/[/\\]resources[/\\]app[/\\]?$/i, '');
+    if (stripped !== appRoot) {
+      candidates.push(path.join(stripped, 'resources', 'app', WORKBENCH_RELATIVE));
+    }
   }
+
+  // Strategy 2: derive from process.execPath (e.g. C:\...\Cursor.exe)
+  if (process.execPath) {
+    const execDir = path.dirname(process.execPath);
+    candidates.push(path.join(execDir, 'resources', 'app', WORKBENCH_RELATIVE));
+  }
+
+  // Strategy 3: platform defaults
   if (process.platform === 'darwin') {
-    return path.join(
-      '/Applications/Cursor.app/Contents/Resources/app',
-      WORKBENCH_RELATIVE,
+    candidates.push(
+      path.join('/Applications', 'Cursor.app', 'Contents', 'Resources', 'app', WORKBENCH_RELATIVE),
+    );
+  } else if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || '';
+    candidates.push(
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE),
+      path.join(localAppData, 'cursor', 'resources', 'app', WORKBENCH_RELATIVE),
+      path.join('C:', 'Program Files', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE),
+    );
+  } else {
+    candidates.push(
+      path.join('/opt', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE),
+      path.join('/usr', 'lib', 'cursor', 'resources', 'app', WORKBENCH_RELATIVE),
+      path.join('/usr', 'share', 'cursor', 'resources', 'app', WORKBENCH_RELATIVE),
     );
   }
-  if (process.platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA || '';
-    return path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE);
+
+  // Deduplicate and find the first existing file
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const normalized = path.resolve(candidate);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    if (fs.existsSync(normalized)) {
+      _resolvedWorkbenchPath = normalized;
+      return normalized;
+    }
   }
-  return path.join('/opt/Cursor/resources/app', WORKBENCH_RELATIVE);
+
+  // None found — return the best guess for error messages
+  return candidates[0] || path.join('resources', 'app', WORKBENCH_RELATIVE);
 }
 
 export function getBackupPath(): string {
@@ -558,10 +604,24 @@ export function isPatchApplied(): boolean {
 }
 
 export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus> {
+  log.appendLine(`[Patcher] appRoot: ${vscode.env.appRoot || '(empty)'}`);
+  log.appendLine(`[Patcher] execPath: ${process.execPath}`);
+  log.appendLine(`[Patcher] platform: ${process.platform}/${process.arch}`);
+
   const wbPath = getWorkbenchPath();
   log.appendLine(`[Patcher] Target: ${wbPath}`);
 
   if (!fs.existsSync(wbPath)) {
+    // Log all candidate paths to help debug
+    const execDir = path.dirname(process.execPath);
+    const resourcesDir = path.join(execDir, 'resources');
+    log.appendLine(`[Patcher] resources dir exists: ${fs.existsSync(resourcesDir)}`);
+    if (fs.existsSync(resourcesDir)) {
+      try {
+        const entries = fs.readdirSync(resourcesDir);
+        log.appendLine(`[Patcher] resources contents: ${entries.join(', ')}`);
+      } catch {}
+    }
     return { patched: false, alreadyPatched: false, error: `Workbench file not found: ${wbPath}` };
   }
 
