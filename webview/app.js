@@ -551,6 +551,55 @@ function extractImages(text) {
   return { cleaned, imageUrls };
 }
 
+const PREVIEWABLE_EXTS = new Set([
+  'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg',
+  'html', 'txt', 'md', 'json', 'csv',
+  'mp4', 'webm', 'mp3', 'wav',
+  'xlsx', 'docx', 'pptx',
+]);
+
+const INLINE_PREVIEW_EXTS = new Set([
+  'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg',
+  'html', 'mp4', 'webm', 'mp3', 'wav',
+]);
+
+function fileUrl(relativePath) {
+  if (!state.currentProject) return null;
+  return API._addToken(
+    `/api/projects/${state.currentProject}/files/serve?path=${encodeURIComponent(relativePath)}`
+  );
+}
+
+/**
+ * After markdown rendering, find <code> elements containing file paths and
+ * wrap them in clickable links that open in a preview overlay or download.
+ */
+function linkifyFilePaths(html) {
+  return html.replace(
+    /<code>([^<]+?\.(\w{1,5}))<\/code>/g,
+    (_match, filePath, ext) => {
+      if (!PREVIEWABLE_EXTS.has(ext.toLowerCase())) {
+        return `<code>${filePath}</code>`;
+      }
+      const url = fileUrl(filePath);
+      if (!url) return `<code>${filePath}</code>`;
+      const icon = getFileIcon(ext.toLowerCase());
+      return `<a class="file-link" href="${escAttr(url)}" data-ext="${ext.toLowerCase()}" data-path="${escAttr(filePath)}" onclick="openFilePreview(event, this)">${icon}<code>${escHtml(filePath)}</code></a>`;
+    }
+  );
+}
+
+function getFileIcon(ext) {
+  if (ext === 'pdf') return '<span class="file-icon">📄</span>';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) return '<span class="file-icon">🖼️</span>';
+  if (['mp4', 'webm'].includes(ext)) return '<span class="file-icon">🎬</span>';
+  if (['mp3', 'wav'].includes(ext)) return '<span class="file-icon">🎵</span>';
+  if (['xlsx'].includes(ext)) return '<span class="file-icon">📊</span>';
+  if (['docx'].includes(ext)) return '<span class="file-icon">📝</span>';
+  if (['pptx'].includes(ext)) return '<span class="file-icon">📽️</span>';
+  return '<span class="file-icon">📎</span>';
+}
+
 function renderMarkdown(text) {
   const { cleaned: noImages, imageUrls } = extractImages(text);
   const cleaned = noImages
@@ -576,7 +625,7 @@ function renderMarkdown(text) {
 
   if (cleaned) {
     try {
-      html += marked.parse(cleaned);
+      html += linkifyFilePaths(marked.parse(cleaned));
     } catch {
       html += `<p>${escHtml(cleaned)}</p>`;
     }
@@ -665,15 +714,64 @@ function showToast(text, type = 'info') {
   setTimeout(() => toast.remove(), 3000);
 }
 
-// ── Lightbox ──
+// ── Lightbox / File Preview ──
 function openLightbox(src) {
+  openFileOverlay(`<img src="${escAttr(src)}" alt="Full size">`);
+}
+
+function openFilePreview(event, el) {
+  event.preventDefault();
+  const url = el.href;
+  const ext = el.dataset.ext;
+  const filePath = el.dataset.path;
+  const baseName = filePath.split('/').pop();
+
+  if (INLINE_PREVIEW_EXTS.has(ext)) {
+    let content;
+    if (ext === 'pdf') {
+      content = `<iframe src="${escAttr(url)}" class="preview-iframe"></iframe>`;
+    } else if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) {
+      content = `<img src="${escAttr(url)}" alt="${escAttr(baseName)}">`;
+    } else if (['mp4', 'webm'].includes(ext)) {
+      content = `<video controls autoplay src="${escAttr(url)}"></video>`;
+    } else if (['mp3', 'wav'].includes(ext)) {
+      content = `<audio controls autoplay src="${escAttr(url)}"></audio>`;
+    } else {
+      content = `<iframe src="${escAttr(url)}" class="preview-iframe"></iframe>`;
+    }
+    openFileOverlay(content, baseName, url);
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
+function openFileOverlay(content, title, downloadUrl) {
   const existing = document.getElementById('lightbox');
   if (existing) existing.remove();
 
   const overlay = document.createElement('div');
   overlay.id = 'lightbox';
-  overlay.innerHTML = `<img src="${escAttr(src)}" alt="Full size">`;
-  overlay.addEventListener('click', () => overlay.remove());
+
+  const header = title
+    ? `<div class="preview-header">
+        <span class="preview-title">${escHtml(title)}</span>
+        <div class="preview-actions">
+          ${downloadUrl ? `<a class="preview-btn" href="${escAttr(downloadUrl)}" target="_blank" download>↓ Open</a>` : ''}
+          <button class="preview-btn preview-close">✕</button>
+        </div>
+      </div>`
+    : '';
+
+  overlay.innerHTML = `${header}<div class="preview-body">${content}</div>`;
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target.classList.contains('preview-close')) {
+      overlay.remove();
+    }
+  });
+  const closeBtn = overlay.querySelector('.preview-close');
+  if (closeBtn) closeBtn.addEventListener('click', () => overlay.remove());
+
   document.body.appendChild(overlay);
 }
 

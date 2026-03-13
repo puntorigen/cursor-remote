@@ -491,6 +491,74 @@ export class RemoteServer {
       fs.createReadStream(filePath).pipe(res);
     });
 
+    // ── Workspace file serving (PDFs, images, etc. from project folder) ──
+
+    this.app.get('/api/projects/:slug/files/serve', (req, res) => {
+      const filePath = req.query.path as string;
+      if (!filePath) {
+        res.status(400).json({ error: 'path query parameter required' });
+        return;
+      }
+
+      const wsPath = slugToPath(req.params.slug);
+
+      // Resolve relative paths against the project root
+      const resolved = filePath.startsWith('/')
+        ? filePath
+        : path.resolve(wsPath, filePath);
+
+      // Security: only allow serving files under the project root
+      const normalizedResolved = path.resolve(resolved);
+      const normalizedWs = path.resolve(wsPath);
+      if (!normalizedResolved.startsWith(normalizedWs + path.sep) && normalizedResolved !== normalizedWs) {
+        res.status(403).json({ error: 'Path is outside project folder' });
+        return;
+      }
+
+      if (!fs.existsSync(normalizedResolved)) {
+        res.status(404).json({ error: 'File not found' });
+        return;
+      }
+
+      const stat = fs.statSync(normalizedResolved);
+      if (!stat.isFile() || stat.size > 50 * 1024 * 1024) {
+        res.status(403).json({ error: 'Not a servable file' });
+        return;
+      }
+
+      const ext = path.extname(normalizedResolved).toLowerCase();
+      const mimes: Record<string, string> = {
+        '.pdf': 'application/pdf',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.html': 'text/html',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.csv': 'text/csv',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+      };
+      const contentType = mimes[ext] || 'application/octet-stream';
+
+      res.type(contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      const baseName = path.basename(normalizedResolved);
+      if (!contentType.startsWith('image/') && contentType !== 'application/pdf') {
+        res.setHeader('Content-Disposition', `inline; filename="${baseName}"`);
+      }
+      fs.createReadStream(normalizedResolved).pipe(res);
+    });
+
     // ── Launch Cursor on a project ──────────────────────────────────────
 
     this.app.post('/api/projects/:slug/open', (req, res) => {

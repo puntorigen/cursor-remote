@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.17 — 2026-03-13
+
+### Clickable file links with preview in chat messages
+- File paths mentioned in agent responses (e.g. `` `startup/docs/meeting-cheatsheet.pdf` ``) are now detected and rendered as clickable links with file-type icons.
+- Clicking a link opens a preview overlay:
+  - **PDFs** display in an embedded iframe viewer
+  - **Images** show in a lightbox
+  - **Videos/Audio** play inline with controls
+  - **Other files** (xlsx, docx, pptx) open in a new tab for download
+- New server endpoint `GET /api/projects/:slug/files/serve?path=<relative>` serves files from the actual project workspace folder with security checks (path traversal protection, 50MB limit).
+- Supports PDF, PNG, JPG, JPEG, WebP, GIF, SVG, HTML, TXT, MD, JSON, CSV, XLSX, DOCX, PPTX, MP4, WebM, MP3, WAV.
+- Preview overlay includes a title bar with the filename and an "Open" button for downloading.
+
 ## v1.0.16 — 2026-03-13
 
 ### Fix missing chat titles for inactive chats

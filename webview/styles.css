@@ -370,15 +370,49 @@ main {
 }
 
 /* Lightbox overlay */
+/* File links in messages */
+.file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 6px;
+  padding: 2px 8px;
+  transition: background 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+
+.file-link:hover, .file-link:active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--accent);
+}
+
+.file-link code {
+  color: inherit;
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* Lightbox / File preview overlay */
 #lightbox {
   position: fixed;
   inset: 0;
   z-index: 200;
   background: rgba(0, 0, 0, 0.92);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 0;
   cursor: pointer;
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
@@ -389,6 +423,84 @@ main {
   max-height: 100%;
   border-radius: 8px;
   object-fit: contain;
+}
+
+.preview-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.preview-title {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.preview-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #fff;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.preview-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.preview-body {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.preview-body img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.preview-body video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+}
+
+.preview-body audio {
+  width: 80%;
+  max-width: 400px;
+}
+
+.preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 8px;
+  background: #fff;
 }
 
 /* Scroll-to-bottom FAB */
