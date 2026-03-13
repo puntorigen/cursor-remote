@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.18 — 2026-03-13
+
+### Fix patching on Windows
+- Use `vscode.env.appRoot` to locate the workbench file dynamically instead of hardcoded platform paths. Works regardless of where Cursor is installed (user install, system install, custom location).
+- Fix `atomicWriteFileSync` on Windows: `fs.renameSync` fails with EPERM when the target file is memory-mapped by the running Cursor process. Now falls back to `fs.copyFileSync` when rename fails.
+- Platform-specific default paths retained as fallback if `appRoot` is empty.
+
 ## v1.0.17 — 2026-03-13
 
 ### Clickable file links with preview in chat messages

@@ -38,7 +38,16 @@ const SENTINEL = '/* __CURSOR_REMOTE_PATCHED__ */';
 
 const WORKBENCH_RELATIVE = 'out/vs/workbench/workbench.desktop.main.js';
 
+/**
+ * Uses vscode.env.appRoot (the running Cursor's own resources/app dir)
+ * so the path is always correct regardless of install location.
+ * Falls back to platform-specific defaults if appRoot is empty.
+ */
 function getWorkbenchPath(): string {
+  const appRoot = vscode.env.appRoot;
+  if (appRoot) {
+    return path.join(appRoot, WORKBENCH_RELATIVE);
+  }
   if (process.platform === 'darwin') {
     return path.join(
       '/Applications/Cursor.app/Contents/Resources/app',
@@ -424,12 +433,13 @@ function validatePatchSyntax(patchCode: string): string | null {
 // ─── Atomic file write ──────────────────────────────────────────────────────
 
 /**
- * Writes `content` to `targetPath` atomically:
- *   1. Write to a temp file in the same directory
- *   2. fsync the temp file
- *   3. Rename temp → target (atomic on POSIX, near-atomic on NTFS)
+ * Writes `content` to `targetPath` safely.
  *
- * If anything fails, the temp file is cleaned up and the original is untouched.
+ * On POSIX: atomic temp-file + rename approach.
+ * On Windows: rename-over often fails with EPERM because the file is
+ * memory-mapped by the running Cursor process; we fall back to a direct
+ * truncate-and-write via writeFileSync, which Windows allows even on
+ * mapped files.
  */
 function atomicWriteFileSync(targetPath: string, content: string): void {
   const dir = path.dirname(targetPath);
@@ -444,9 +454,15 @@ function atomicWriteFileSync(targetPath: string, content: string): void {
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(tmpPath, targetPath);
+    try {
+      fs.renameSync(tmpPath, targetPath);
+    } catch {
+      // Rename fails on Windows when the target is in use; fall back to
+      // copying content and removing the temp file.
+      fs.copyFileSync(tmpPath, targetPath);
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    }
   } catch (err) {
-    // Clean up temp file on failure
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
