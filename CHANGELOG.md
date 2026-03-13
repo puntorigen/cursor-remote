@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.10 — 2026-03-13
+
+### Fix scroll-to-bottom on chat detail
+- The chat messages container is now the sole scroll target when viewing a conversation — `main` is set to `overflow: hidden` in chat view so scroll commands reliably target `#messages`.
+- `scrollToBottom` fires at three intervals (double rAF, 150ms, 500ms) to handle late layout shifts from markdown/syntax rendering.
+
+### Floating scroll-to-bottom button
+- A WhatsApp-style floating button (chevron-down) appears when the user scrolls up from the bottom of a conversation.
+- Tapping it smooth-scrolls to the latest message.
+- The button auto-hides when the user is already at the bottom.
+
 ## v1.0.9 — 2026-03-13
 
 ### Reload all windows on update

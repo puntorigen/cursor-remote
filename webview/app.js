@@ -61,6 +61,9 @@ function navigate(view, opts = {}) {
   const el = document.getElementById(`${view}View`);
   if (el) el.classList.add('active');
 
+  const main = document.getElementById('mainContent');
+  main.style.overflow = view === 'chat' ? 'hidden' : '';
+
   state.currentView = view;
 
   const backBtn = document.getElementById('backBtn');
@@ -70,6 +73,7 @@ function navigate(view, opts = {}) {
 
   backBtn.classList.toggle('hidden', view === 'projects');
   inputBar.classList.toggle('hidden', view !== 'chat');
+  document.getElementById('scrollToBottomBtn').classList.remove('visible');
 
   switch (view) {
     case 'projects':
@@ -562,21 +566,32 @@ function escAttr(s) {
   return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function scrollToBottom() {
+function scrollToBottom(smooth) {
   const container = document.getElementById('messages');
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
+  const doScroll = () => {
+    if (smooth) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    } else {
       container.scrollTop = container.scrollHeight;
-    });
-  });
-  setTimeout(() => {
-    container.scrollTop = container.scrollHeight;
-  }, 150);
+    }
+  };
+  requestAnimationFrame(() => requestAnimationFrame(doScroll));
+  setTimeout(doScroll, 150);
+  setTimeout(doScroll, 500);
 }
 
 function isScrolledToBottom(el) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
+
+// Floating scroll-to-bottom button
+const scrollFab = document.getElementById('scrollToBottomBtn');
+scrollFab.addEventListener('click', () => scrollToBottom(true));
+
+document.getElementById('messages').addEventListener('scroll', () => {
+  const container = document.getElementById('messages');
+  scrollFab.classList.toggle('visible', !isScrolledToBottom(container));
+});
 
 function formatTimeAgo(timestamp) {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);

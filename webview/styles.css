@@ -111,6 +111,7 @@ main {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .view {
@@ -121,6 +122,13 @@ main {
 .view.active {
   display: flex;
   flex-direction: column;
+}
+
+#chatView.active {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 .view-header {
@@ -381,6 +389,40 @@ main {
   max-height: 100%;
   border-radius: 8px;
   object-fit: contain;
+}
+
+/* Scroll-to-bottom FAB */
+#scrollToBottomBtn {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+#scrollToBottomBtn.visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+#scrollToBottomBtn:active {
+  background: var(--bg-hover);
+  transform: scale(0.95);
 }
 
 /* Input Bar */
