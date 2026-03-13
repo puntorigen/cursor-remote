@@ -332,45 +332,58 @@ function buildPatchCode(v: DiscoveredVars): string {
   const ES = v.composerEventService;
   const VS = v.composerViewsService;
 
+  // Helper: show/focus a composer and wait for handle to load
+  const waitForHandle = [
+    `async function _crWaitHandle(ds,vs,id,ms){`,
+      `await vs.showAndFocus(id);`,
+      `let h=ds.getHandleIfLoaded(id);`,
+      `if(h)return h;`,
+      `for(let w=0;w<ms;w+=50){`,
+        `await new Promise(r=>setTimeout(r,50));`,
+        `h=ds.getHandleIfLoaded(id);`,
+        `if(h)return h;`,
+      `}`,
+      `return null;`,
+    `}`,
+  ].join('');
+
   return [
     SENTINEL,
+
+    // Inject the helper as an IIFE-scoped block that also registers commands
+    `void function(){`,
+    waitForHandle,
 
     `${CR}.registerCommand("cursorRemote._submitChat",async(n,e)=>{`,
       `try{`,
         `const t=e.composerId,i=e.text;`,
         `if(!t||!i)return{ok:false,error:"composerId and text required"};`,
         `const ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES});`,
-        `const h=ds.getHandleIfLoaded(t);`,
-        `if(!h)return{ok:false,error:"composer not found: "+t};`,
+        `const h=await _crWaitHandle(ds,vs,t,2000);`,
+        `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
-        `await vs.showAndFocus(t);`,
         `await cs.submitChatMaybeAbortCurrent(t,i,{});`,
         `return{ok:true,composerId:t};`,
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
-    `})`,
-
-    `,`,
+    `});`,
 
     `${CR}.registerCommand("cursorRemote._setComposerText",async(n,e)=>{`,
       `try{`,
         `const t=e.composerId,i=e.text;`,
         `if(!t||typeof i!=="string")return{ok:false,error:"composerId and text required"};`,
         `const ds=n.get(${DS}),es=n.get(${ES}),vs=n.get(${VS});`,
-        `const h=ds.getHandleIfLoaded(t);`,
-        `if(!h)return{ok:false,error:"composer not found: "+t};`,
+        `const h=await _crWaitHandle(ds,vs,t,2000);`,
+        `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
-        `await vs.showAndFocus(t);`,
         `return{ok:true,composerId:t};`,
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
-    `})`,
-
-    `,`,
+    `});`,
 
     `${CR}.registerCommand("cursorRemote._getState",async(n)=>{`,
       `try{`,
@@ -387,7 +400,9 @@ function buildPatchCode(v: DiscoveredVars): string {
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
-    `})`,
+    `});`,
+
+    `}()`,
   ].join('');
 }
 
@@ -402,7 +417,7 @@ function buildPatchCode(v: DiscoveredVars): string {
  */
 function validatePatchSyntax(patchCode: string): string | null {
   try {
-    new vm.Script(`(async function(){0${patchCode}})`, { filename: 'patch-validation.js' });
+    new vm.Script(`(async function(){0,${patchCode}})`, { filename: 'patch-validation.js' });
     return null;
   } catch (err: any) {
     return err.message || String(err);

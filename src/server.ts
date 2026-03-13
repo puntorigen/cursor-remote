@@ -194,36 +194,36 @@ export class RemoteServer {
   // ── Composer ID resolution ──────────────────────────────────────────────
 
   /**
-   * The web UI sends transcript chat IDs (JSONL filenames) as composerId.
-   * Cursor's internal composer IDs are different. This method queries
-   * the live composer state and tries to match by ID; if no match is
-   * found it falls back to the currently selected composer.
+   * The transcript chat UUID IS the Cursor composer ID (they are the same).
+   * We verify it exists in allComposers and pass it through directly.
+   * The patched _submitChat command will call showAndFocus to activate the
+   * tab before submitting, even if it wasn't previously loaded/selected.
    */
   private async resolveComposerId(transcriptId: string): Promise<string | undefined> {
     try {
       const state = await this.injector.getComposerState();
-      if (!state.ok) return undefined;
+      if (!state.ok) return transcriptId;
 
-      // Direct match (in case the user somehow sends an actual composer ID)
-      if (state.openComposerIds?.includes(transcriptId)) {
-        return transcriptId;
-      }
       if (state.composers?.some(c => c.id === transcriptId)) {
+        this.log.appendLine(
+          `[Server] Composer ${transcriptId.slice(0, 8)}… found in allComposers — using directly`
+        );
         return transcriptId;
       }
 
-      // No match — use the selected/focused composer in this window
+      // Not in allComposers — fall back to selected composer
       if (state.selectedComposerId) {
         this.log.appendLine(
-          `[Server] Transcript ID ${transcriptId.slice(0, 8)}… not found in live composers, ` +
-          `using selected: ${state.selectedComposerId}`
+          `[Server] Composer ${transcriptId.slice(0, 8)}… not in allComposers, ` +
+          `falling back to selected: ${state.selectedComposerId}`
         );
         return state.selectedComposerId;
       }
 
-      return undefined;
+      // Pass through anyway — showAndFocus in the patch will handle it
+      return transcriptId;
     } catch {
-      return undefined;
+      return transcriptId;
     }
   }
 
