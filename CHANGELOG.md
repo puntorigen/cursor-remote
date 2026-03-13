@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.11 — 2026-03-13
+
+### Fix reload-all from secondary windows
+- When a secondary window triggers "Reload All Windows" (e.g. after an update), it now delegates to the primary via `POST /api/_reloadAll`. The primary then fans out reload requests to all registered windows before reloading itself.
+- Previously, a secondary's registry was empty so it only reloaded itself.
+- Auto-update check now only runs on the primary window to avoid duplicate notifications.
+
 ## v1.0.10 — 2026-03-13
 
 ### Fix scroll-to-bottom on chat detail

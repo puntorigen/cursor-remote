@@ -73,10 +73,38 @@ export class RemoteServer {
   }
 
   /**
-   * Tell every registered secondary window to reload, then reload this window.
-   * Used after updates so all Cursor instances pick up the new extension version.
+   * Tell every Cursor instance to reload.
+   * If called on a secondary, delegates to the primary (which has the full registry).
+   * If called on the primary, sends reload to all secondaries then reloads itself.
    */
-  reloadAllWindows() {
+  reloadAllWindows(primaryPort?: number) {
+    if (primaryPort && this.boundPort !== primaryPort) {
+      // Secondary: ask primary to coordinate the full reload
+      const data = JSON.stringify({});
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: primaryPort,
+        path: '/api/_reloadAll',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+      }, () => {});
+      req.on('error', () => {
+        // Primary unreachable — just reload self
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      });
+      req.write(data);
+      req.end();
+      // Also reload self (primary will handle the others)
+      setTimeout(() => {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }, 300);
+      return;
+    }
+
+    // Primary: send reload to every registered window except self
     for (const entry of this.registry.values()) {
       if (entry.port === this.boundPort) continue;
       const data = JSON.stringify({});
@@ -323,6 +351,11 @@ export class RemoteServer {
       setTimeout(() => {
         vscode.commands.executeCommand('workbench.action.reloadWindow');
       }, 200);
+    });
+
+    this.app.post('/api/_reloadAll', (_req, res) => {
+      res.json({ ok: true });
+      this.reloadAllWindows();
     });
 
     // ── Read-only endpoints (served from any window, no proxy needed) ───

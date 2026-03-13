@@ -154,7 +154,7 @@ export async function activate(context: vscode.ExtensionContext) {
           'Reload All Windows',
         );
         if (action === 'Reload All Windows') {
-          server?.reloadAllWindows();
+          server?.reloadAllWindows(PRIMARY_PORT);
         }
       }
     })
@@ -170,7 +170,7 @@ export async function activate(context: vscode.ExtensionContext) {
           'Reload All Windows',
         );
         if (action === 'Reload All Windows') {
-          server?.reloadAllWindows();
+          server?.reloadAllWindows(PRIMARY_PORT);
         }
       } else {
         vscode.window.showWarningMessage(
@@ -180,7 +180,7 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  const reloadAll = () => server?.reloadAllWindows();
+  const reloadAll = () => server?.reloadAllWindows(PRIMARY_PORT);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.checkForUpdates', () =>
@@ -195,7 +195,9 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
 
-  setTimeout(() => checkForUpdate(context, log, reloadAll).catch(() => {}), 5_000);
+  if (isPrimary) {
+    setTimeout(() => checkForUpdate(context, log, reloadAll).catch(() => {}), 5_000);
+  }
 
   log.appendLine('[Extension] Cursor Remote activated.');
 }
