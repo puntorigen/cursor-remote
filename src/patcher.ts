@@ -14,6 +14,11 @@
  *   cursorRemote._getState()
  *     — Returns { selectedComposerId, composerIds } for the current window.
  *
+ * Dynamic discovery:
+ *   Minified variable names (DI tokens, CommandsRegistry) are discovered at
+ *   patch time by matching stable string literals that survive minification.
+ *   This makes the patcher resilient to Cursor updates that re-minify variables.
+ *
  * Safety:
  *   - Backup created before any modification
  *   - Patched content is syntax-validated before writing
@@ -23,7 +28,6 @@
  *   - Auto-reload loop protection via globalState
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vm from 'vm';
 import * as crypto from 'crypto';
@@ -51,23 +55,161 @@ export function getBackupPath(): string {
   return getWorkbenchPath() + '.cursor-remote-backup';
 }
 
-const ANCHOR = 'await i.showAndFocus(a)}),It(Xbb)';
+// ─── Dynamic variable discovery ─────────────────────────────────────────────
+
+interface DiscoveredVars {
+  /** Minified name of createDecorator (e.g. "Ti") */
+  createDecorator: string;
+  /** Minified name of CommandsRegistry singleton (e.g. "Ss") */
+  commandsRegistry: string;
+  /** Minified DI token for composerDataService (e.g. "Oa") */
+  composerDataService: string;
+  /** Minified DI token for composerChatService (e.g. "AM") */
+  composerChatService: string;
+  /** Minified DI token for composerEventService (e.g. "BA") */
+  composerEventService: string;
+  /** Minified DI token for composerViewsService (e.g. "rw") */
+  composerViewsService: string;
+}
 
 /**
- * Builds the JS to inject. Uses the DI tokens in scope at the anchor:
- *   ag = composerService, Oa = composerDataService,
- *   DA = composerEventService, rw = composerViewsService,
- *   AM = composerChatService
+ * Extracts minified variable names from the workbench JS using stable string
+ * literals that survive minification. Each service is registered via
+ * `createDecorator("serviceName")` where the string is stable.
  */
-function buildPatchCode(): string {
+function discoverVariables(content: string): { vars?: DiscoveredVars; errors: string[] } {
+  const errors: string[] = [];
+
+  const servicePatterns: Record<string, string> = {
+    composerDataService:  'composerDataService',
+    composerChatService:  'composerChatService',
+    composerEventService: 'composerEventService',
+    composerViewsService: 'composerViewsService',
+  };
+
+  let createDecoratorName: string | undefined;
+  const tokens: Record<string, string> = {};
+
+  for (const [key, serviceId] of Object.entries(servicePatterns)) {
+    // Match: VarName=FuncName("serviceId")
+    // The func name is the minified createDecorator, the var is the DI token
+    const re = new RegExp(`([A-Za-z_$][A-Za-z0-9_$]*)=([A-Za-z_$][A-Za-z0-9_$]*)\\("${serviceId}"\\)`);
+    const m = content.match(re);
+    if (!m) {
+      errors.push(`Could not find DI token for "${serviceId}"`);
+      continue;
+    }
+    tokens[key] = m[1];
+    if (!createDecoratorName) {
+      createDecoratorName = m[2];
+    }
+  }
+
+  if (!createDecoratorName) {
+    errors.push('Could not determine createDecorator function name');
+  }
+
+  // Discover CommandsRegistry: look for the singleton that calls
+  // .registerCommand("composer.acceptPlan" — a stable Cursor command ID.
+  // Fall back to other known stable command IDs if needed.
+  let commandsRegistryName: string | undefined;
+  const anchorCommands = [
+    'composer.acceptPlan',
+    'workbench.action.chat.open',
+    'composer.splitEditorWithNewComposer',
+  ];
+
+  for (const cmd of anchorCommands) {
+    const escaped = cmd.replace(/\./g, '\\.');
+    const re = new RegExp(`([A-Za-z_$][A-Za-z0-9_$]*)\\.registerCommand\\("${escaped}"`);
+    const m = content.match(re);
+    if (m) {
+      commandsRegistryName = m[1];
+      break;
+    }
+  }
+
+  if (!commandsRegistryName) {
+    errors.push('Could not find CommandsRegistry variable (tried: ' + anchorCommands.join(', ') + ')');
+  }
+
+  if (errors.length > 0) {
+    return { errors };
+  }
+
+  return {
+    vars: {
+      createDecorator: createDecoratorName!,
+      commandsRegistry: commandsRegistryName!,
+      composerDataService: tokens.composerDataService,
+      composerChatService: tokens.composerChatService,
+      composerEventService: tokens.composerEventService,
+      composerViewsService: tokens.composerViewsService,
+    },
+    errors: [],
+  };
+}
+
+// ─── Dynamic anchor discovery ───────────────────────────────────────────────
+
+/**
+ * Locates a stable injection point in the workbench JS. Searches for known
+ * Cursor command registration strings and finds the end of that statement.
+ * Tries multiple candidates for resilience across versions.
+ *
+ * Returns the character offset to insert after, or null if none found.
+ */
+function findInjectionPoint(content: string, commandsRegistry: string): { offset: number; anchor: string } | null {
+  const anchorCommands = [
+    'composer.acceptPlan',
+    'workbench.action.chat.open',
+    'composer.splitEditorWithNewComposer',
+  ];
+
+  for (const cmd of anchorCommands) {
+    const searchStr = `${commandsRegistry}.registerCommand("${cmd}"`;
+    const idx = content.indexOf(searchStr);
+    if (idx === -1) continue;
+
+    // Walk forward to find the matching close of this registerCommand(...) call
+    const openIdx = content.indexOf('(', idx + commandsRegistry.length);
+    if (openIdx === -1) continue;
+
+    let depth = 0;
+    let i = openIdx;
+    for (; i < content.length; i++) {
+      if (content[i] === '(') depth++;
+      else if (content[i] === ')') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+
+    if (depth !== 0) continue;
+
+    return { offset: i + 1, anchor: cmd };
+  }
+
+  return null;
+}
+
+// ─── Patch code generation ──────────────────────────────────────────────────
+
+function buildPatchCode(v: DiscoveredVars): string {
+  const CR = v.commandsRegistry;
+  const DS = v.composerDataService;
+  const CS = v.composerChatService;
+  const ES = v.composerEventService;
+  const VS = v.composerViewsService;
+
   return [
     SENTINEL,
 
-    `Ss.registerCommand("cursorRemote._submitChat",async(n,e)=>{`,
+    `${CR}.registerCommand("cursorRemote._submitChat",async(n,e)=>{`,
       `try{`,
         `const t=e.composerId,i=e.text;`,
         `if(!t||!i)return{ok:false,error:"composerId and text required"};`,
-        `const ds=n.get(Oa),cs=n.get(AM),vs=n.get(rw),es=n.get(DA);`,
+        `const ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES});`,
         `const h=ds.getHandleIfLoaded(t);`,
         `if(!h)return{ok:false,error:"composer not found: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
@@ -82,11 +224,11 @@ function buildPatchCode(): string {
 
     `,`,
 
-    `Ss.registerCommand("cursorRemote._setComposerText",async(n,e)=>{`,
+    `${CR}.registerCommand("cursorRemote._setComposerText",async(n,e)=>{`,
       `try{`,
         `const t=e.composerId,i=e.text;`,
         `if(!t||typeof i!=="string")return{ok:false,error:"composerId and text required"};`,
-        `const ds=n.get(Oa),es=n.get(DA),vs=n.get(rw);`,
+        `const ds=n.get(${DS}),es=n.get(${ES}),vs=n.get(${VS});`,
         `const h=ds.getHandleIfLoaded(t);`,
         `if(!h)return{ok:false,error:"composer not found: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
@@ -100,9 +242,9 @@ function buildPatchCode(): string {
 
     `,`,
 
-    `Ss.registerCommand("cursorRemote._getState",async(n)=>{`,
+    `${CR}.registerCommand("cursorRemote._getState",async(n)=>{`,
       `try{`,
-        `const ds=n.get(Oa);`,
+        `const ds=n.get(${DS});`,
         `const sel=ds.selectedComposerId;`,
         `const ids=ds.allComposersData.selectedComposerIds||[];`,
         `const all=(ds.allComposersData.allComposers||[]).map(c=>({`,
@@ -122,23 +264,15 @@ function buildPatchCode(): string {
 // ─── Syntax validation ──────────────────────────────────────────────────────
 
 /**
- * Validates that `code` is parseable JS by compiling it in a V8 Script.
- * This catches syntax errors (missing braces, bad tokens, etc.) without
- * executing anything. Returns null on success, error message on failure.
- *
- * We only validate a ~64KB window around the injection point rather than
- * the full 50MB file, since Script compilation of the whole thing would
- * be slow and may hit memory limits.
+ * Validates that the injected patch code is parseable JS by compiling it
+ * as a standalone comma-separated expression list. This catches syntax
+ * errors in the generated code (missing braces, bad tokens, etc.) without
+ * trying to parse a window of the 50MB workbench file — which would fail
+ * because any fixed window lands mid-expression.
  */
-function validateSyntax(fullContent: string, injectionOffset: number): string | null {
-  const WINDOW = 32_768;
-  const start = Math.max(0, injectionOffset - WINDOW);
-  const end = Math.min(fullContent.length, injectionOffset + WINDOW);
-  const snippet = fullContent.slice(start, end);
-
+function validatePatchSyntax(patchCode: string): string | null {
   try {
-    // Wrap in a function body so top-level `await` and `return` are valid
-    new vm.Script(`(async function(){${snippet}})`, { filename: 'patch-validation.js' });
+    new vm.Script(`(async function(){0${patchCode}})`, { filename: 'patch-validation.js' });
     return null;
   } catch (err: any) {
     return err.message || String(err);
@@ -280,24 +414,50 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
     return { patched: true, alreadyPatched: true };
   }
 
-  const anchorIdx = content.indexOf(ANCHOR);
-  if (anchorIdx === -1) {
+  // Discover minified variable names from stable string literals
+  log.appendLine('[Patcher] Discovering minified variable names...');
+  const { vars, errors } = discoverVariables(content);
+  if (!vars) {
+    const detail = errors.join('; ');
+    log.appendLine(`[Patcher] Discovery failed: ${detail}`);
     return {
       patched: false,
       alreadyPatched: false,
-      error: 'Anchor string not found in workbench JS — Cursor version may have changed. '
-           + 'Try updating the extension or re-running the patcher.',
+      error: `Could not discover required variables in workbench JS: ${detail}`,
     };
   }
 
+  log.appendLine(
+    `[Patcher] Discovered: CommandsRegistry=${vars.commandsRegistry}, `
+    + `createDecorator=${vars.createDecorator}, `
+    + `DataService=${vars.composerDataService}, `
+    + `ChatService=${vars.composerChatService}, `
+    + `EventService=${vars.composerEventService}, `
+    + `ViewsService=${vars.composerViewsService}`,
+  );
+
+  // Find injection point using stable command ID strings
+  log.appendLine('[Patcher] Locating injection point...');
+  const injection = findInjectionPoint(content, vars.commandsRegistry);
+  if (!injection) {
+    return {
+      patched: false,
+      alreadyPatched: false,
+      error: 'Could not find a suitable injection point in workbench JS. '
+           + 'None of the expected Cursor commands were found.',
+    };
+  }
+
+  log.appendLine(`[Patcher] Injection anchor: "${injection.anchor}" at offset ${injection.offset}`);
+
   // Build the patched content
-  const insertAt = anchorIdx + ANCHOR.length;
-  const patchCode = ',' + buildPatchCode();
+  const insertAt = injection.offset;
+  const patchCode = ',' + buildPatchCode(vars);
   const patchedContent = content.slice(0, insertAt) + patchCode + content.slice(insertAt);
 
-  // Validate syntax around the injection point before touching disk
-  log.appendLine('[Patcher] Validating patched JS syntax...');
-  const syntaxError = validateSyntax(patchedContent, insertAt);
+  // Validate the generated patch code in isolation before touching disk
+  log.appendLine('[Patcher] Validating patch code syntax...');
+  const syntaxError = validatePatchSyntax(patchCode);
   if (syntaxError) {
     return {
       patched: false,
@@ -323,7 +483,6 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
   try {
     atomicWriteFileSync(wbPath, patchedContent);
   } catch (err: any) {
-    // Atomic write failed — original file is untouched
     return {
       patched: false,
       alreadyPatched: false,
