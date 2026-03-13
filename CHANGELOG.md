@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.12 — 2026-03-13
+
+### Improved project list categorization
+- **Real projects** with chats are shown first, prominently.
+- **Standalone chats** (numeric-slug entries without a real workspace folder) are grouped in a collapsible "Standalone chats" section.
+- **Projects without chats** are in their own collapsible section at the bottom.
+
+### Open/closed window indicators
+- Each project now shows a status tag: **LIVE** (connected, messages route here), **OPEN** (Cursor window running with this project), or **CLOSED** (no Cursor window open).
+- The `/api/projects` endpoint now includes `hasOpenWindow` and `isOrphan` flags using the window registry.
+
+### Launch Cursor from web UI
+- When sending a message to a project that has no open Cursor window, a prompt asks whether to launch Cursor on that folder first.
+- New `POST /api/projects/:slug/open` endpoint spawns `cursor <path>` to open the project.
+
 ## v1.0.11 — 2026-03-13
 
 ### Fix reload-all from secondary windows

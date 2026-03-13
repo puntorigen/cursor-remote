@@ -30,6 +30,7 @@ export interface ProjectInfo {
   name: string;
   lastModified: number;
   chatCount: number;
+  isOrphan: boolean;
 }
 
 const CURSOR_PROJECTS_DIR = path.join(os.homedir(), '.cursor', 'projects');
@@ -127,12 +128,15 @@ export function listProjects(): ProjectInfo[] {
         } catch {}
       }
 
+      const isOrphan = /^\d+$/.test(d.name);
+
       return {
         slug: d.name,
         path: wsPath,
-        name: path.basename(wsPath),
+        name: isOrphan ? `Untitled chat (${d.name})` : path.basename(wsPath),
         lastModified,
         chatCount,
+        isOrphan,
       };
     })
     .sort((a, b) => b.lastModified - a.lastModified);

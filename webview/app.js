@@ -33,6 +33,7 @@ const API = {
 const state = {
   currentView: 'projects',
   currentProject: null,
+  currentProjectClosed: false,
   currentChat: null,
   messages: [],
   messageCount: 0,
@@ -41,6 +42,7 @@ const state = {
   pollInterval: 2000,
   activeWorkspace: null,
   activeWorkspaceName: null,
+  projectsData: [],
 };
 
 // ── Markdown setup ──
@@ -82,14 +84,17 @@ function navigate(view, opts = {}) {
       stopPolling();
       loadProjects();
       break;
-    case 'chats':
+    case 'chats': {
       headerTitle.textContent = opts.name || 'Project';
       headerSub.textContent = opts.path || '';
       state.currentProject = opts.slug;
+      const proj = state.projectsData.find((p) => p.slug === opts.slug);
+      state.currentProjectClosed = proj ? !proj.hasOpenWindow : false;
       stopPolling();
       loadChats(opts.slug);
       loadGitFiles(opts.slug);
       break;
+    }
     case 'chat':
       headerTitle.textContent = opts.preview || 'Chat';
       headerSub.textContent = '';
@@ -133,8 +138,11 @@ async function loadProjects() {
       return;
     }
 
-    const withChats = projects.filter((p) => p.chatCount > 0);
-    const withoutChats = projects.filter((p) => !p.chatCount);
+    state.projectsData = projects;
+
+    const realProjects = projects.filter((p) => !p.isOrphan && p.chatCount > 0);
+    const emptyProjects = projects.filter((p) => !p.isOrphan && !p.chatCount);
+    const orphanChats = projects.filter((p) => p.isOrphan && p.chatCount > 0);
 
     const activeBanner = state.activeWorkspaceName
       ? `<div class="active-workspace">Connected to: <strong>${escHtml(state.activeWorkspaceName)}</strong> — messages will be sent here</div>`
@@ -142,33 +150,38 @@ async function loadProjects() {
 
     let html = activeBanner;
 
-    if (withChats.length > 0) {
-      html += withChats.map((p) => renderProjectItem(p)).join('');
+    if (realProjects.length > 0) {
+      html += realProjects.map((p) => renderProjectItem(p)).join('');
     } else {
       html += '<div class="empty"><h3>No conversations yet</h3><p>Start a chat in Cursor to see it here</p></div>';
     }
 
-    if (withoutChats.length > 0) {
-      html += `
-        <div class="section-divider" id="emptyProjectsToggle">
-          <span class="section-label">Other projects (${withoutChats.length})</span>
-          <svg class="section-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-        </div>
-        <div id="emptyProjectsList" class="collapsed-section">
-          ${withoutChats.map((p) => renderProjectItem(p)).join('')}
-        </div>`;
+    if (orphanChats.length > 0) {
+      html += buildCollapsibleSection(
+        'orphanToggle', 'orphanList',
+        `Standalone chats (${orphanChats.length})`,
+        orphanChats.map((p) => renderProjectItem(p)).join('')
+      );
+    }
+
+    if (emptyProjects.length > 0) {
+      html += buildCollapsibleSection(
+        'emptyProjectsToggle', 'emptyProjectsList',
+        `Projects without chats (${emptyProjects.length})`,
+        emptyProjects.map((p) => renderProjectItem(p)).join('')
+      );
     }
 
     list.innerHTML = html;
 
-    const toggle = document.getElementById('emptyProjectsToggle');
-    if (toggle) {
+    list.querySelectorAll('.section-divider').forEach((toggle) => {
       toggle.addEventListener('click', () => {
-        const section = document.getElementById('emptyProjectsList');
+        const sectionId = toggle.dataset.section;
+        const section = document.getElementById(sectionId);
         const expanded = section.classList.toggle('expanded');
         toggle.classList.toggle('expanded', expanded);
       });
-    }
+    });
 
     list.querySelectorAll('.list-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -190,11 +203,24 @@ function renderProjectItem(p) {
   const isActive = state.activeWorkspace && p.path === state.activeWorkspace;
   const activeClass = isActive ? ' active-project' : '';
   const activeTag = isActive ? '<span class="active-tag">LIVE</span>' : '';
+  const openTag = !isActive && p.hasOpenWindow ? '<span class="open-tag">OPEN</span>' : '';
+  const closedTag = !isActive && !p.hasOpenWindow && !p.isOrphan ? '<span class="closed-tag">CLOSED</span>' : '';
   return `
     <div class="list-item${activeClass}" data-slug="${p.slug}" data-path="${escAttr(p.path)}" data-name="${escAttr(p.name)}">
-      <span class="title">${escHtml(p.name)} ${activeTag}</span>
+      <span class="title">${escHtml(p.name)} ${activeTag}${openTag}${closedTag}</span>
       <span class="meta">${chats}${timeAgo ? ` · ${timeAgo}` : ''}</span>
       <span class="preview">${escHtml(p.path)}</span>
+    </div>`;
+}
+
+function buildCollapsibleSection(toggleId, sectionId, label, innerHtml) {
+  return `
+    <div class="section-divider" id="${toggleId}" data-section="${sectionId}">
+      <span class="section-label">${label}</span>
+      <svg class="section-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div id="${sectionId}" class="collapsed-section">
+      ${innerHtml}
     </div>`;
 }
 
@@ -428,6 +454,23 @@ msgInput.addEventListener('input', () => {
 async function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
+
+  // If the project has no open Cursor window, offer to launch it
+  if (state.currentProject && state.currentProjectClosed) {
+    const launch = confirm(
+      'This project has no open Cursor window.\n\nLaunch Cursor on this project first?'
+    );
+    if (launch) {
+      try {
+        showToast('Launching Cursor...', 'info');
+        await API.post(`/projects/${state.currentProject}/open`, {});
+        showToast('Cursor launched — wait a moment for it to load, then send again.', 'success');
+      } catch (err) {
+        showToast(`Failed to launch: ${err.message}`, 'error');
+      }
+    }
+    return;
+  }
 
   sendBtn.disabled = true;
   msgInput.value = '';

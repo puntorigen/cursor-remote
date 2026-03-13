@@ -1,6 +1,7 @@
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as cp from 'child_process';
 import express from 'express';
 import * as vscode from 'vscode';
 import * as os from 'os';
@@ -11,6 +12,7 @@ import {
   getChatSince,
   getChatFileSize,
   getAiModifiedFiles,
+  slugToPath,
 } from './transcripts';
 import { getGitStatus, getFileDiff, getGitDiffStat } from './files';
 import { MessageInjector } from './injector';
@@ -379,7 +381,13 @@ export class RemoteServer {
 
     this.app.get('/api/projects', (_req, res) => {
       try {
-        res.json(listProjects());
+        const projects = listProjects();
+        const openSlugs = new Set(this.registry.keys());
+        const enriched = projects.map((p) => ({
+          ...p,
+          hasOpenWindow: openSlugs.has(p.slug),
+        }));
+        res.json(enriched);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
@@ -481,6 +489,29 @@ export class RemoteServer {
       res.type(contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400');
       fs.createReadStream(filePath).pipe(res);
+    });
+
+    // ── Launch Cursor on a project ──────────────────────────────────────
+
+    this.app.post('/api/projects/:slug/open', (req, res) => {
+      const projectSlug = req.params.slug;
+      const wsPath = slugToPath(projectSlug);
+
+      if (!fs.existsSync(wsPath)) {
+        res.status(404).json({ error: `Folder not found: ${wsPath}` });
+        return;
+      }
+
+      const cli = process.platform === 'win32' ? 'cursor.cmd' : 'cursor';
+      this.log.appendLine(`[Server] Launching Cursor on ${wsPath}`);
+
+      cp.execFile(cli, [wsPath], { timeout: 10_000 }, (err) => {
+        if (err) {
+          this.log.appendLine(`[Server] Launch failed: ${err.message}`);
+        }
+      });
+
+      res.json({ ok: true, path: wsPath });
     });
 
     // ── Window-specific endpoints (may proxy to correct window) ─────────

@@ -550,16 +550,29 @@ textarea {
   background: #111827 !important;
 }
 
-.active-tag {
+.active-tag, .open-tag, .closed-tag {
   font-size: 10px;
   font-weight: 700;
-  background: var(--green);
-  color: #000;
   padding: 1px 6px;
   border-radius: 4px;
   margin-left: 6px;
   vertical-align: middle;
   letter-spacing: 0.5px;
+}
+
+.active-tag {
+  background: var(--green);
+  color: #000;
+}
+
+.open-tag {
+  background: var(--accent);
+  color: #fff;
+}
+
+.closed-tag {
+  background: var(--border);
+  color: var(--text-dim);
 }
 
 /* Section divider for collapsible groups */
