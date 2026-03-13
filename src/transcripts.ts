@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execSync } from 'child_process';
 
 export interface TranscriptMessage {
   role: 'user' | 'assistant';
@@ -17,6 +18,7 @@ export interface ToolCallInfo {
 
 export interface ChatSummary {
   id: string;
+  title: string;
   firstMessage: string;
   messageCount: number;
   lastModified: number;
@@ -31,6 +33,53 @@ export interface ProjectInfo {
 }
 
 const CURSOR_PROJECTS_DIR = path.join(os.homedir(), '.cursor', 'projects');
+
+function getStateDbPath(): string {
+  switch (process.platform) {
+    case 'darwin':
+      return path.join(os.homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+    case 'linux':
+      return path.join(os.homedir(), '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+    case 'win32':
+      return path.join(process.env.APPDATA || '', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+    default:
+      return '';
+  }
+}
+
+/**
+ * Batch-read chat titles from Cursor's internal state.vscdb for a list of composer IDs.
+ * Returns a Map<composerId, title>. Falls back gracefully if sqlite3 is unavailable.
+ */
+function getChatTitles(composerIds: string[]): Map<string, string> {
+  const titles = new Map<string, string>();
+  if (composerIds.length === 0) return titles;
+
+  const dbPath = getStateDbPath();
+  if (!dbPath || !fs.existsSync(dbPath)) return titles;
+
+  try {
+    const placeholders = composerIds.map((id) => `'composerData:${id}'`).join(',');
+    const query = `SELECT key, value FROM cursorDiskKV WHERE key IN (${placeholders});`;
+    const raw = execSync(`sqlite3 -json "${dbPath}" "${query}"`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const rows: { key: string; value: string }[] = JSON.parse(raw || '[]');
+    for (const row of rows) {
+      try {
+        const composerId = row.key.replace('composerData:', '');
+        const data = JSON.parse(row.value);
+        if (data.name) {
+          titles.set(composerId, data.name);
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return titles;
+}
 
 const TOOL_PATTERNS: Record<string, 'edit' | 'create' | 'delete' | 'read'> = {
   StrReplace: 'edit',
@@ -97,7 +146,8 @@ export function listChats(projectSlug: string): ChatSummary[] {
   );
   if (!fs.existsSync(transcriptsDir)) return [];
 
-  const results: ChatSummary[] = [];
+  const chatIds: string[] = [];
+  const chatMeta: { id: string; firstMessage: string; messageCount: number; lastModified: number }[] = [];
 
   for (const entry of fs.readdirSync(transcriptsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -120,7 +170,8 @@ export function listChats(projectSlug: string): ChatSummary[] {
       } catch {}
     }
 
-    results.push({
+    chatIds.push(entry.name);
+    chatMeta.push({
       id: entry.name,
       firstMessage,
       messageCount: lines.length,
@@ -128,7 +179,14 @@ export function listChats(projectSlug: string): ChatSummary[] {
     });
   }
 
-  return results.sort((a, b) => b.lastModified - a.lastModified);
+  const titles = getChatTitles(chatIds);
+
+  return chatMeta
+    .map((m) => ({
+      ...m,
+      title: titles.get(m.id) || '',
+    }))
+    .sort((a, b) => b.lastModified - a.lastModified);
 }
 
 export function getChat(projectSlug: string, chatId: string): TranscriptMessage[] {

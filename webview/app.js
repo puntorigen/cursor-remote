@@ -209,17 +209,19 @@ async function loadChats(slug) {
       .map((c) => {
         const date = new Date(c.lastModified).toLocaleString();
         const preview = cleanPreview(c.firstMessage);
+        const title = c.title || preview;
         return `
-          <div class="list-item" data-id="${c.id}" data-preview="${escAttr(preview)}">
-            <span class="preview">${escHtml(preview)}</span>
+          <div class="list-item" data-id="${c.id}" data-title="${escAttr(title)}" data-preview="${escAttr(preview)}">
+            <span class="title">${escHtml(title)}</span>
             <span class="meta">${c.messageCount} messages &middot; ${date}</span>
+            ${c.title ? `<span class="preview">${escHtml(preview)}</span>` : ''}
           </div>`;
       })
       .join('');
 
     list.querySelectorAll('.list-item').forEach((item) => {
       item.addEventListener('click', () => {
-        navigate('chat', { id: item.dataset.id, preview: item.dataset.preview });
+        navigate('chat', { id: item.dataset.id, preview: item.dataset.title });
       });
     });
   } catch (err) {
@@ -236,9 +238,11 @@ async function loadChat(slug, chatId) {
     const data = await API.get(`/projects/${slug}/chats/${chatId}`);
     state.messages = data.messages;
     state.messageCount = data.messages.length;
+    state.lastModified = Date.now();
     renderMessages(data.messages);
     scrollToBottom();
     startPolling(slug, chatId);
+    setTimeout(scrollToBottom, 300);
   } catch (err) {
     container.innerHTML = `<div class="empty"><h3>Error</h3><p>${escHtml(err.message)}</p></div>`;
   }
@@ -427,7 +431,7 @@ async function sendMessage() {
 
   const container = document.getElementById('messages');
   const msgDiv = document.createElement('div');
-  msgDiv.className = 'msg user';
+  msgDiv.className = 'msg user pending-remote';
   msgDiv.innerHTML = `<div class="role-label">You (remote)</div>${renderMarkdown(text)}`;
   container.appendChild(msgDiv);
   scrollToBottom();
@@ -440,12 +444,16 @@ async function sendMessage() {
     });
     if (!result.success) {
       showToast(`Failed: ${result.error || 'Unknown error'}`, 'error');
+      msgDiv.remove();
     } else {
-      const label = result.method === 'chatOpenNew' ? 'Sent (new chat)' : 'Sent (continuing chat)';
-      showToast(label, 'success');
+      state.messages.push({ role: 'user', content: text });
+      state.messageCount = state.messages.length;
+      msgDiv.classList.remove('pending-remote');
+      showToast('Sent', 'success');
     }
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
+    msgDiv.remove();
   }
 
   sendBtn.disabled = false;
@@ -476,16 +484,50 @@ document.querySelectorAll('.sub-tab').forEach((tab) => {
 });
 
 // ── Helpers ──
+
+function extractImages(text) {
+  const imageUrls = [];
+  const cleaned = text.replace(/<image_files>[\s\S]*?<\/image_files>/g, (block) => {
+    const pathRegex = /\d+\.\s+(\S+)/g;
+    let match;
+    while ((match = pathRegex.exec(block)) !== null) {
+      const absPath = match[1];
+      const projectsMatch = absPath.match(/\.cursor\/projects\/([^/]+)\/assets\/(.+)$/);
+      if (projectsMatch) {
+        const slug = projectsMatch[1];
+        const filename = projectsMatch[2];
+        imageUrls.push(API._addToken(`/api/projects/${slug}/assets/${encodeURIComponent(filename)}`));
+      }
+    }
+    return '';
+  });
+  return { cleaned, imageUrls };
+}
+
 function renderMarkdown(text) {
-  const cleaned = text
+  const { cleaned: noImages, imageUrls } = extractImages(text);
+  const cleaned = noImages
     .replace(/<user_query>\n?/g, '')
     .replace(/<\/user_query>\n?/g, '')
     .replace(/<system_reminder>[\s\S]*?<\/system_reminder>/g, '');
-  try {
-    return marked.parse(cleaned);
-  } catch {
-    return `<p>${escHtml(cleaned)}</p>`;
+
+  let html = '';
+
+  if (imageUrls.length > 0) {
+    html += '<div class="msg-images">';
+    for (const url of imageUrls) {
+      html += `<img class="msg-img" src="${escAttr(url)}" alt="Attached image" loading="lazy" onclick="openLightbox(this.src)">`;
+    }
+    html += '</div>';
   }
+
+  try {
+    html += marked.parse(cleaned);
+  } catch {
+    html += `<p>${escHtml(cleaned)}</p>`;
+  }
+
+  return html;
 }
 
 function cleanPreview(text) {
@@ -509,8 +551,13 @@ function escAttr(s) {
 function scrollToBottom() {
   const container = document.getElementById('messages');
   requestAnimationFrame(() => {
-    container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
   });
+  setTimeout(() => {
+    container.scrollTop = container.scrollHeight;
+  }, 150);
 }
 
 function isScrolledToBottom(el) {
@@ -544,6 +591,18 @@ function showToast(text, type = 'info') {
   `;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 3000);
+}
+
+// ── Lightbox ──
+function openLightbox(src) {
+  const existing = document.getElementById('lightbox');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'lightbox';
+  overlay.innerHTML = `<img src="${escAttr(src)}" alt="Full size">`;
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
 }
 
 // ── Init ──

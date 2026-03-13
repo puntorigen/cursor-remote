@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import express from 'express';
 import * as vscode from 'vscode';
+import * as os from 'os';
 import {
   listProjects,
   listChats,
@@ -345,6 +346,38 @@ export class RemoteServer {
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
+    });
+
+    // ── Asset serving (images from project assets folders) ────────────
+
+    this.app.get('/api/projects/:slug/assets/:filename', (req, res) => {
+      const cursorProjects = path.join(os.homedir(), '.cursor', 'projects');
+      const fileName = path.basename(req.params.filename);
+      const filePath = path.join(cursorProjects, req.params.slug, 'assets', fileName);
+
+      if (!fs.existsSync(filePath)) {
+        res.status(404).send('Asset not found');
+        return;
+      }
+
+      const ext = path.extname(fileName).toLowerCase();
+      const imageMimes: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+      };
+      const contentType = imageMimes[ext];
+      if (!contentType) {
+        res.status(403).send('Only image files are served');
+        return;
+      }
+
+      res.type(contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      fs.createReadStream(filePath).pipe(res);
     });
 
     // ── Window-specific endpoints (may proxy to correct window) ─────────
