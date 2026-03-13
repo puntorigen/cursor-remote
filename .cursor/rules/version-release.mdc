@@ -1,0 +1,28 @@
+---
+description: Version bump and release checklist — run these steps whenever the version changes
+globs: package.json
+alwaysApply: false
+---
+
+# Version Release Checklist
+
+When bumping the version in `package.json`, **always** complete every step below before committing:
+
+1. **Update `package.json` version** — e.g. `"version": "1.0.5"`.
+2. **Update README.md** — replace **all** occurrences of the old version:
+   - Badge: `![Version X.Y.Z](https://img.shields.io/badge/version-X.Y.Z-green.svg)`
+   - VSIX filenames: `cursor-remote-X.Y.Z.vsix` (appears in install instructions).
+3. **Build**: `npm run build`
+4. **Package**: `npm run package` — produces `cursor-remote-X.Y.Z.vsix`.
+5. **Delete the old `.vsix`** from the repo root (only one prebuilt vsix should be tracked).
+6. **Commit** with message format: `vX.Y.Z: <short description of changes>`
+7. **Push** with large buffer: `git -c http.postBuffer=157286400 push origin main`
+8. **Create a GitHub Release** so the self-updater can find it:
+
+```bash
+gh release create vX.Y.Z ./cursor-remote-X.Y.Z.vsix \
+  --title "vX.Y.Z" \
+  --notes "Release notes here"
+```
+
+The `.vsix` asset attached to the release is what `src/updater.ts` downloads when users click "Update Now".
