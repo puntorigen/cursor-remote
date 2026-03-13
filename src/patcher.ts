@@ -55,6 +55,57 @@ export function getBackupPath(): string {
   return getWorkbenchPath() + '.cursor-remote-backup';
 }
 
+function getAppRoot(): string {
+  const wbPath = getWorkbenchPath();
+  // workbench lives at <appRoot>/out/vs/workbench/workbench.desktop.main.js
+  return path.resolve(path.dirname(wbPath), '..', '..', '..');
+}
+
+function getProductJsonPath(): string {
+  return path.join(getAppRoot(), 'product.json');
+}
+
+// ─── Integrity checksum ─────────────────────────────────────────────────────
+
+const CHECKSUM_KEY = 'vs/workbench/workbench.desktop.main.js';
+
+/**
+ * Computes the same checksum that Cursor/VS Code's IntegrityServiceImpl uses:
+ * SHA-256, base64-encoded, with trailing '=' padding stripped.
+ */
+function computeChecksum(content: Buffer): string {
+  return crypto.createHash('sha256').update(content).digest('base64').replace(/=+$/, '');
+}
+
+/**
+ * Updates the workbench checksum in product.json so Cursor's integrity
+ * checker sees the file as valid. Reads the current product.json, replaces
+ * just the workbench entry, and writes it back atomically.
+ */
+function updateProductChecksum(newChecksum: string, log: vscode.OutputChannel): void {
+  const productPath = getProductJsonPath();
+  if (!fs.existsSync(productPath)) {
+    log.appendLine(`[Patcher] product.json not found at ${productPath} — skipping checksum update`);
+    return;
+  }
+
+  const raw = fs.readFileSync(productPath, 'utf-8');
+  const product = JSON.parse(raw);
+
+  if (!product.checksums || typeof product.checksums !== 'object') {
+    log.appendLine('[Patcher] product.json has no checksums field — skipping');
+    return;
+  }
+
+  const oldChecksum = product.checksums[CHECKSUM_KEY];
+  product.checksums[CHECKSUM_KEY] = newChecksum;
+
+  atomicWriteFileSync(productPath, JSON.stringify(product, null, '\t'));
+  log.appendLine(
+    `[Patcher] Updated product.json checksum: ${oldChecksum?.slice(0, 12)}... → ${newChecksum.slice(0, 12)}...`,
+  );
+}
+
 // ─── Dynamic variable discovery ─────────────────────────────────────────────
 
 interface DiscoveredVars {
@@ -490,6 +541,14 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
     };
   }
 
+  // Update product.json checksum so Cursor's integrity check passes
+  try {
+    const newChecksum = computeChecksum(Buffer.from(patchedContent, 'utf-8'));
+    updateProductChecksum(newChecksum, log);
+  } catch (err: any) {
+    log.appendLine(`[Patcher] Warning: could not update product.json checksum: ${err.message}`);
+  }
+
   log.appendLine('[Patcher] Patch applied successfully');
   return { patched: true, alreadyPatched: false, backupPath };
 }
@@ -502,6 +561,16 @@ export async function removePatch(log: vscode.OutputChannel): Promise<boolean> {
     log.appendLine(`[Patcher] Restoring backup: ${backupPath}`);
     fs.copyFileSync(backupPath, wbPath);
     fs.unlinkSync(backupPath);
+
+    // Restore the original checksum in product.json
+    try {
+      const restoredContent = fs.readFileSync(wbPath);
+      const originalChecksum = computeChecksum(restoredContent);
+      updateProductChecksum(originalChecksum, log);
+    } catch (err: any) {
+      log.appendLine(`[Patcher] Warning: could not restore product.json checksum: ${err.message}`);
+    }
+
     return true;
   }
 
