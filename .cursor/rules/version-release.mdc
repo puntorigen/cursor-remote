@@ -18,10 +18,23 @@ When bumping the version in `package.json`, **always** complete every step below
 6. **Commit** with message format: `vX.Y.Z: <short description of changes>`
 7. **Tag the release**: `git tag -a vX.Y.Z -m "vX.Y.Z: <short description>"`
 8. **Push** with tags and large buffer: `git -c http.postBuffer=157286400 push origin main --tags`
-9. **Create a GitHub Release** from the tag on github.com so the self-updater can find the `.vsix`:
-   - Go to https://github.com/puntorigen/cursor-remote/releases/new
-   - Select the `vX.Y.Z` tag, set title to `vX.Y.Z`
-   - Attach `cursor-remote-X.Y.Z.vsix` as a release asset
-   - Publish the release
+9. **Create a GitHub Release** with the `.vsix` attached (the self-updater downloads it):
 
-The `.vsix` asset attached to the release is what `src/updater.ts` downloads when users click "Update Now".
+```bash
+TOKEN=$(git remote get-url origin | sed 's|https://\(.*\)@github.com.*|\1|')
+
+# Create the release
+RELEASE_ID=$(curl -s -X POST \
+  -H "Authorization: token $TOKEN" \
+  -H "Accept: application/vnd.github.v3+json" \
+  https://api.github.com/repos/puntorigen/cursor-remote/releases \
+  -d '{"tag_name":"vX.Y.Z","name":"vX.Y.Z","body":"Release notes","draft":false}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+# Upload the .vsix asset
+curl -s -X POST \
+  -H "Authorization: token $TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  "https://uploads.github.com/repos/puntorigen/cursor-remote/releases/$RELEASE_ID/assets?name=cursor-remote-X.Y.Z.vsix" \
+  --data-binary @cursor-remote-X.Y.Z.vsix
+```
