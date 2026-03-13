@@ -1,4 +1,5 @@
 node_modules/
 dist/
 *.vsix
+!cursor-remote-*.vsix
 .DS_Store

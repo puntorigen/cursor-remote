@@ -29,30 +29,29 @@ Control your Cursor IDE from your phone. Browse conversations, send messages, an
 ### Prerequisites
 
 - [Cursor](https://cursor.com) IDE (VS Code engine >= 1.90.0)
-- Node.js >= 18
+
+### Prebuilt Package
+
+A prebuilt `cursor-remote-0.1.0.vsix` is included in the repository. Install it directly:
+
+```bash
+cursor --install-extension cursor-remote-0.1.0.vsix
+```
+
+Restart Cursor after installation.
 
 ### From Source
+
+If you prefer to build from source:
 
 ```bash
 git clone https://github.com/your-username/cursor-remote.git
 cd cursor-remote
 npm install
 npm run build
-```
-
-Then install the extension in Cursor using one of these methods:
-
-**Option A — Package as `.vsix` and install:**
-
-```bash
 npm run package
+cursor --install-extension cursor-remote-0.1.0.vsix
 ```
-
-This produces a `cursor-remote-0.1.0.vsix` file. In Cursor, open the command palette and run **Extensions: Install from VSIX...**, then select the file.
-
-**Option B — Development mode:**
-
-Open this folder in Cursor, press `F5` to launch the Extension Development Host with the extension loaded.
 
 ### Optional: cloudflared
 
