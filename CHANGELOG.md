@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.8 — 2026-03-13
+
+### Deduplicate replayed messages
+- When a conversation is continued across sessions, Cursor replays earlier user messages into the transcript. These duplicate lines are now detected and filtered out, so the chat view no longer shows orphaned user messages without agent replies.
+
+### Clean up context noise in messages
+- `<attached_files>`, `<agent_transcripts>`, `<open_and_recently_viewed_files>`, `<user_info>`, and `<system_reminder>` blocks are now stripped from rendered messages.
+- The `[Image]` text prefix on image-bearing messages is removed.
+- Image-only messages display a clean "(image only)" placeholder instead of empty bubbles.
+
 ## v1.0.7 — 2026-03-13
 
 ### Chat titles from Cursor

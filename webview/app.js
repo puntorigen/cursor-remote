@@ -509,7 +509,13 @@ function renderMarkdown(text) {
   const cleaned = noImages
     .replace(/<user_query>\n?/g, '')
     .replace(/<\/user_query>\n?/g, '')
-    .replace(/<system_reminder>[\s\S]*?<\/system_reminder>/g, '');
+    .replace(/<system_reminder>[\s\S]*?<\/system_reminder>/g, '')
+    .replace(/<attached_files>[\s\S]*?<\/attached_files>/g, '')
+    .replace(/<agent_transcripts>[\s\S]*?<\/agent_transcripts>/g, '')
+    .replace(/<open_and_recently_viewed_files>[\s\S]*?<\/open_and_recently_viewed_files>/g, '')
+    .replace(/<user_info>[\s\S]*?<\/user_info>/g, '')
+    .replace(/^\[Image\]\s*/gm, '')
+    .trim();
 
   let html = '';
 
@@ -521,20 +527,28 @@ function renderMarkdown(text) {
     html += '</div>';
   }
 
-  try {
-    html += marked.parse(cleaned);
-  } catch {
-    html += `<p>${escHtml(cleaned)}</p>`;
+  if (cleaned) {
+    try {
+      html += marked.parse(cleaned);
+    } catch {
+      html += `<p>${escHtml(cleaned)}</p>`;
+    }
   }
 
-  return html;
+  return html || '<p><em>(image only)</em></p>';
 }
 
 function cleanPreview(text) {
   return text
     .replace(/<user_query>\n?/g, '')
     .replace(/<\/user_query>\n?/g, '')
+    .replace(/<image_files>[\s\S]*?<\/image_files>/g, '')
+    .replace(/<attached_files>[\s\S]*?<\/attached_files>/g, '')
+    .replace(/<agent_transcripts>[\s\S]*?<\/agent_transcripts>/g, '')
+    .replace(/<open_and_recently_viewed_files>[\s\S]*?<\/open_and_recently_viewed_files>/g, '')
+    .replace(/<user_info>[\s\S]*?<\/user_info>/g, '')
     .replace(/<[^>]+>/g, '')
+    .replace(/^\[Image\]\s*/gm, '')
     .trim();
 }
 

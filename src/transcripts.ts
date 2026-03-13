@@ -204,13 +204,13 @@ export function getChat(projectSlug: string, chatId: string): TranscriptMessage[
     .split('\n')
     .filter((l) => l.trim());
 
-  return lines.map((line, idx) => {
+  const raw = lines.map((line, idx) => {
     try {
       const parsed = JSON.parse(line);
       const text = extractText(parsed);
       const toolCalls = extractToolCalls(text);
       return {
-        role: parsed.role || 'assistant',
+        role: (parsed.role || 'assistant') as 'user' | 'assistant',
         content: text,
         toolCalls,
         timestamp: idx,
@@ -219,6 +219,8 @@ export function getChat(projectSlug: string, chatId: string): TranscriptMessage[
       return { role: 'assistant' as const, content: line, timestamp: idx };
     }
   });
+
+  return deduplicateReplayedMessages(raw);
 }
 
 export function getChatSince(
@@ -265,6 +267,36 @@ export function getAiModifiedFiles(
     path: p,
     operations: Array.from(ops),
   }));
+}
+
+/**
+ * When a conversation is continued across sessions, Cursor replays earlier user
+ * messages (without their assistant replies) as a block of consecutive user lines.
+ * This removes those duplicated user lines so the chat renders cleanly.
+ */
+function deduplicateReplayedMessages(messages: TranscriptMessage[]): TranscriptMessage[] {
+  const seenUserContent = new Set<string>();
+  const result: TranscriptMessage[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+
+    if (msg.role === 'user') {
+      const key = msg.content.trim();
+      const prevIsUser = i > 0 && messages[i - 1].role === 'user';
+      const nextIsUser = i + 1 < messages.length && messages[i + 1].role === 'user';
+      const inUserRun = prevIsUser || nextIsUser;
+
+      if (inUserRun && seenUserContent.has(key)) {
+        continue;
+      }
+      seenUserContent.add(key);
+    }
+
+    result.push(msg);
+  }
+
+  return result;
 }
 
 function extractText(parsed: any): string {
