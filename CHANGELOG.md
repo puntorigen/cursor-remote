@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.20 — 2026-03-13
+
+### Fix VSIX installation on Windows (EINVAL error)
+- `cp.execFile('cursor.cmd', ...)` fails on Windows with EINVAL because `.cmd` is a batch file, not an executable. Now uses `cp.exec()` which invokes via `cmd.exe`.
+- Added fallback: if CLI install fails, uses the VS Code API `workbench.extensions.installExtension` to install the VSIX directly.
+- Increased install timeout from 30s to 60s on Windows.
+
 ## v1.0.19 — 2026-03-13
 
 ### Improved workbench file discovery for Windows

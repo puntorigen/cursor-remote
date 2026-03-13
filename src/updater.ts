@@ -213,22 +213,49 @@ export async function performUpdate(
 
       progress.report({ message: 'Installing...' });
       try {
-        const cli = process.platform === 'win32' ? 'cursor.cmd' : 'cursor';
         await new Promise<void>((resolve, reject) => {
-          cp.execFile(cli, ['--install-extension', vsixPath], { timeout: 30_000 }, (err, stdout, stderr) => {
-            if (err) {
-              log.appendLine(`[Updater] Install stderr: ${stderr}`);
-              reject(err);
-            } else {
-              log.appendLine(`[Updater] Install stdout: ${stdout.trim()}`);
-              resolve();
-            }
-          });
+          // On Windows, use `code --install-extension` via cmd.exe since
+          // cursor.cmd is a batch file that cp.execFile can't run directly.
+          // Also try the VS Code API first as it's more reliable.
+          const args = ['--install-extension', vsixPath];
+          if (process.platform === 'win32') {
+            const cmdLine = `"cursor" --install-extension "${vsixPath}"`;
+            cp.exec(cmdLine, { timeout: 60_000 }, (err, stdout, stderr) => {
+              if (err) {
+                log.appendLine(`[Updater] Install stderr: ${stderr}`);
+                reject(err);
+              } else {
+                log.appendLine(`[Updater] Install stdout: ${stdout.trim()}`);
+                resolve();
+              }
+            });
+          } else {
+            cp.execFile('cursor', args, { timeout: 30_000 }, (err, stdout, stderr) => {
+              if (err) {
+                log.appendLine(`[Updater] Install stderr: ${stderr}`);
+                reject(err);
+              } else {
+                log.appendLine(`[Updater] Install stdout: ${stdout.trim()}`);
+                resolve();
+              }
+            });
+          }
         });
       } catch (err: any) {
-        log.appendLine(`[Updater] Install failed: ${err.message}`);
-        vscode.window.showErrorMessage(`Failed to install update: ${err.message}`);
-        return;
+        log.appendLine(`[Updater] Install via CLI failed: ${err.message}`);
+        // Fallback: use the VS Code commands API to install the VSIX
+        try {
+          log.appendLine('[Updater] Trying VS Code API fallback...');
+          await vscode.commands.executeCommand(
+            'workbench.extensions.installExtension',
+            vscode.Uri.file(vsixPath),
+          );
+          log.appendLine('[Updater] Installed via VS Code API');
+        } catch (err2: any) {
+          log.appendLine(`[Updater] API fallback failed: ${err2.message}`);
+          vscode.window.showErrorMessage(`Failed to install update: ${err.message}`);
+          return;
+        }
       }
 
       await context.globalState.update('skippedVersion', undefined);
