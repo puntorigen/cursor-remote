@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.9 — 2026-03-13
+
+### Reload all windows on update
+- "Reload Now" after an update now reloads **all** Cursor instances (primary + secondaries), not just the window that triggered the update.
+- Each window exposes a `POST /api/_reload` internal endpoint; the primary sends reload requests to every registered secondary before reloading itself.
+- Apply/remove patch commands also reload all windows.
+
+### Fix "composer ID not found" on remote send
+- The web UI was sending the transcript chat ID (JSONL filename UUID) as the `composerId`, but Cursor's internal composer IDs are different. The server now resolves the transcript ID against live composer state: if it matches an open composer it's used directly, otherwise the currently selected/focused composer in the target window is used.
+
 ## v1.0.8 — 2026-03-13
 
 ### Deduplicate replayed messages

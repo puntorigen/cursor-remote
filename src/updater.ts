@@ -120,6 +120,7 @@ async function fetchLatestRelease(log: vscode.OutputChannel): Promise<{ version:
 export async function checkForUpdate(
   context: vscode.ExtensionContext,
   log: vscode.OutputChannel,
+  reloadAll?: () => void,
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration('cursorRemote');
   if (!config.get<boolean>('autoCheckUpdates', true)) {
@@ -151,7 +152,7 @@ export async function checkForUpdate(
   );
 
   if (action === 'Update Now') {
-    await performUpdate(context, log, latest.version, latest.vsixUrl);
+    await performUpdate(context, log, latest.version, latest.vsixUrl, reloadAll);
   } else if (action === 'Skip This Version') {
     await context.globalState.update('skippedVersion', latest.version);
     log.appendLine(`[Updater] User skipped v${latest.version}`);
@@ -168,6 +169,7 @@ export async function performUpdate(
   log: vscode.OutputChannel,
   version?: string,
   vsixUrl?: string,
+  reloadAll?: () => void,
 ): Promise<void> {
   if (!version || !vsixUrl) {
     const latest = await fetchLatestRelease(log);
@@ -235,11 +237,15 @@ export async function performUpdate(
       try { fs.unlinkSync(vsixPath); fs.rmdirSync(tmpDir); } catch { /* ignore */ }
 
       const action = await vscode.window.showInformationMessage(
-        `Cursor Remote updated to v${version}. Reload to activate.`,
-        'Reload Now',
+        `Cursor Remote updated to v${version}. Reload all windows to activate.`,
+        'Reload All Windows',
       );
-      if (action === 'Reload Now') {
-        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      if (action === 'Reload All Windows') {
+        if (reloadAll) {
+          reloadAll();
+        } else {
+          vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
       }
     },
   );

@@ -72,6 +72,33 @@ export class RemoteServer {
     return [...this.registry.values()];
   }
 
+  /**
+   * Tell every registered secondary window to reload, then reload this window.
+   * Used after updates so all Cursor instances pick up the new extension version.
+   */
+  reloadAllWindows() {
+    for (const entry of this.registry.values()) {
+      if (entry.port === this.boundPort) continue;
+      const data = JSON.stringify({});
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: entry.port,
+        path: '/api/_reload',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+      }, () => {});
+      req.on('error', () => {});
+      req.write(data);
+      req.end();
+    }
+    setTimeout(() => {
+      vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }, 500);
+  }
+
   private getPortForSlug(slug: string): number | null {
     return this.registry.get(slug)?.port ?? null;
   }
@@ -132,6 +159,42 @@ export class RemoteServer {
     this.log.appendLine(`[Proxy] Routing ${req.path} for slug=${slug} -> :${targetPort}`);
     this.proxyRequest(targetPort, req, res);
     return true;
+  }
+
+  // ── Composer ID resolution ──────────────────────────────────────────────
+
+  /**
+   * The web UI sends transcript chat IDs (JSONL filenames) as composerId.
+   * Cursor's internal composer IDs are different. This method queries
+   * the live composer state and tries to match by ID; if no match is
+   * found it falls back to the currently selected composer.
+   */
+  private async resolveComposerId(transcriptId: string): Promise<string | undefined> {
+    try {
+      const state = await this.injector.getComposerState();
+      if (!state.ok) return undefined;
+
+      // Direct match (in case the user somehow sends an actual composer ID)
+      if (state.openComposerIds?.includes(transcriptId)) {
+        return transcriptId;
+      }
+      if (state.composers?.some(c => c.id === transcriptId)) {
+        return transcriptId;
+      }
+
+      // No match — use the selected/focused composer in this window
+      if (state.selectedComposerId) {
+        this.log.appendLine(
+          `[Server] Transcript ID ${transcriptId.slice(0, 8)}… not found in live composers, ` +
+          `using selected: ${state.selectedComposerId}`
+        );
+        return state.selectedComposerId;
+      }
+
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // ── Middleware ───────────────────────────────────────────────────────────
@@ -253,6 +316,13 @@ export class RemoteServer {
 
     this.app.get('/api/_registry', (_req, res) => {
       res.json(this.getRegistry());
+    });
+
+    this.app.post('/api/_reload', (_req, res) => {
+      res.json({ ok: true });
+      setTimeout(() => {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }, 200);
     });
 
     // ── Read-only endpoints (served from any window, no proxy needed) ───
@@ -391,12 +461,21 @@ export class RemoteServer {
         }
         if (this.maybeProxy(slug, req, res)) return;
 
+        // The web UI sends the transcript chat ID as composerId, but the
+        // injector needs Cursor's internal composer ID.  We resolve the
+        // correct composer on the target window by matching the transcript
+        // ID to live composer state, falling back to the selected composer.
+        const resolvedComposerId = composerId
+          ? await this.resolveComposerId(composerId)
+          : undefined;
+
         this.log.appendLine(
           `[Server] Message from remote: ${message.slice(0, 80)}...` +
-          (composerId ? ` (composer: ${composerId})` : '') +
+          (composerId ? ` (transcript: ${composerId})` : '') +
+          (resolvedComposerId ? ` (resolved composer: ${resolvedComposerId})` : '') +
           (slug ? ` (slug: ${slug})` : '')
         );
-        const result = await this.injector.send(message, composerId);
+        const result = await this.injector.send(message, resolvedComposerId);
         res.json(result);
       } catch (err: any) {
         res.status(500).json({ error: err.message });

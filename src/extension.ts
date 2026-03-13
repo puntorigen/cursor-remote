@@ -150,11 +150,11 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Patch is already applied.');
       } else {
         const action = await vscode.window.showInformationMessage(
-          'Patch applied. Reload Cursor to activate.',
-          'Reload Now',
+          'Patch applied. Reload all windows to activate.',
+          'Reload All Windows',
         );
-        if (action === 'Reload Now') {
-          vscode.commands.executeCommand('workbench.action.reloadWindow');
+        if (action === 'Reload All Windows') {
+          server?.reloadAllWindows();
         }
       }
     })
@@ -166,11 +166,11 @@ export async function activate(context: vscode.ExtensionContext) {
       if (removed) {
         await context.globalState.update('patchReloadPending', undefined);
         const action = await vscode.window.showInformationMessage(
-          'Patch removed. Reload Cursor to restore original behavior.',
-          'Reload Now',
+          'Patch removed. Reload all windows to restore original behavior.',
+          'Reload All Windows',
         );
-        if (action === 'Reload Now') {
-          vscode.commands.executeCommand('workbench.action.reloadWindow');
+        if (action === 'Reload All Windows') {
+          server?.reloadAllWindows();
         }
       } else {
         vscode.window.showWarningMessage(
@@ -180,9 +180,11 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  const reloadAll = () => server?.reloadAllWindows();
+
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.checkForUpdates', () =>
-      performUpdate(context, log))
+      performUpdate(context, log, undefined, undefined, reloadAll))
   );
 
   if (autoStart) {
@@ -193,7 +195,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
 
-  setTimeout(() => checkForUpdate(context, log).catch(() => {}), 5_000);
+  setTimeout(() => checkForUpdate(context, log, reloadAll).catch(() => {}), 5_000);
 
   log.appendLine('[Extension] Cursor Remote activated.');
 }
