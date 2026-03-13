@@ -31,6 +31,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
 import * as crypto from 'crypto';
+import * as os from 'os';
 import * as vscode from 'vscode';
 
 const SENTINEL = '/* __CURSOR_REMOTE_PATCHED__ */';
@@ -91,9 +92,10 @@ function ensureChecksum(wbContent: Buffer, log: vscode.OutputChannel): void {
     const actual = computeChecksum(wbContent);
     if (product.checksums[CHECKSUM_KEY] === actual) {
       log.appendLine('[Patcher] product.json checksum already correct');
-      return;
+    } else {
+      updateProductChecksum(actual, log);
     }
-    updateProductChecksum(actual, log);
+    suppressIntegrityNotification(log);
   } catch (err: any) {
     log.appendLine(`[Patcher] Warning: checksum ensure failed: ${err.message}`);
   }
@@ -126,6 +128,61 @@ function updateProductChecksum(newChecksum: string, log: vscode.OutputChannel): 
   log.appendLine(
     `[Patcher] Updated product.json checksum: ${oldChecksum?.slice(0, 12)}... → ${newChecksum.slice(0, 12)}...`,
   );
+}
+
+// ─── Integrity notification suppression ─────────────────────────────────────
+
+/**
+ * Cursor's IntegrityServiceImpl caches checksums at boot, so even after we
+ * update product.json the in-memory values are stale and the "corrupt
+ * installation" notification fires. The service checks a storage key
+ * `integrityService` with `{dontShowPrompt: true, commit}` before showing
+ * the banner.  We write that key directly into the globalStorage SQLite DB
+ * so the notification is suppressed for the current commit.
+ */
+function suppressIntegrityNotification(log: vscode.OutputChannel): void {
+  try {
+    const productPath = getProductJsonPath();
+    if (!fs.existsSync(productPath)) return;
+    const product = JSON.parse(fs.readFileSync(productPath, 'utf-8'));
+    const commit = product.commit;
+    if (!commit) return;
+
+    const dbPath = getGlobalStorageDbPath();
+    if (!dbPath || !fs.existsSync(dbPath)) {
+      log.appendLine('[Patcher] globalStorage DB not found — cannot suppress integrity notification');
+      return;
+    }
+
+    const value = JSON.stringify({ dontShowPrompt: true, commit });
+
+    // Use better-sqlite3 if bundled, otherwise fall back to spawning sqlite3 CLI
+    try {
+      const { execFileSync } = require('child_process');
+      execFileSync('sqlite3', [
+        dbPath,
+        `INSERT OR REPLACE INTO ItemTable (key, value) VALUES ('integrityService', '${value.replace(/'/g, "''")}');`,
+      ], { timeout: 5_000 });
+      log.appendLine(`[Patcher] Suppressed integrity notification for commit ${commit.slice(0, 12)}...`);
+    } catch {
+      log.appendLine('[Patcher] sqlite3 CLI not available — integrity notification may appear once');
+    }
+  } catch (err: any) {
+    log.appendLine(`[Patcher] Warning: could not suppress integrity notification: ${err.message}`);
+  }
+}
+
+function getGlobalStorageDbPath(): string | null {
+  let base: string;
+  if (process.platform === 'darwin') {
+    base = path.join(os.homedir(), 'Library', 'Application Support', 'Cursor');
+  } else if (process.platform === 'win32') {
+    base = path.join(process.env.APPDATA || '', 'Cursor');
+  } else {
+    base = path.join(os.homedir(), '.config', 'Cursor');
+  }
+  const dbPath = path.join(base, 'User', 'globalStorage', 'state.vscdb');
+  return fs.existsSync(dbPath) ? dbPath : null;
 }
 
 // ─── Dynamic variable discovery ─────────────────────────────────────────────
