@@ -5,6 +5,7 @@ import { RemoteServer } from './server';
 import { TunnelManager } from './tunnel';
 import { generateQrSvg } from './qr';
 import { ensurePatch, applyPatch, removePatch, isPatchApplied } from './patcher';
+import { checkForUpdate, performUpdate } from './updater';
 
 let server: RemoteServer | null = null;
 let tunnel: TunnelManager | null = null;
@@ -174,6 +175,11 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('cursorRemote.checkForUpdates', () =>
+      performUpdate(context, log))
+  );
+
   if (autoStart) {
     const started = await startServer(port, log);
 
@@ -181,6 +187,9 @@ export async function activate(context: vscode.ExtensionContext) {
       await startTunnel(port, log);
     }
   }
+
+  // Auto-check for updates after a short delay (non-blocking)
+  setTimeout(() => checkForUpdate(context, log).catch(() => {}), 5_000);
 
   log.appendLine('[Extension] Cursor Remote activated.');
 }
@@ -285,6 +294,7 @@ async function showMenu(
     items.push(
       { label: '$(play) Start Server', description: `Port ${port}`, action: 'start' },
       { label: '$(output) View Logs', action: 'logs' },
+      { label: '$(cloud-download) Check for Updates', action: 'check-updates' },
     );
   } else {
     if (tunnelUrl) {
@@ -303,6 +313,7 @@ async function showMenu(
       { label: '', kind: vscode.QuickPickItemKind.Separator, action: '' },
       { label: '$(debug-stop) Stop Server & Tunnel', action: 'stop' },
       { label: '$(output) View Logs', action: 'logs' },
+      { label: '$(cloud-download) Check for Updates', action: 'check-updates' },
     );
   }
 
@@ -343,6 +354,9 @@ async function showMenu(
       break;
     case 'logs':
       log.show();
+      break;
+    case 'check-updates':
+      vscode.commands.executeCommand('cursorRemote.checkForUpdates');
       break;
   }
 }
