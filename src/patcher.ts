@@ -78,6 +78,28 @@ function computeChecksum(content: Buffer): string {
 }
 
 /**
+ * Ensures product.json's checksum matches the given workbench content.
+ * Only writes if the checksum is actually stale.
+ */
+function ensureChecksum(wbContent: Buffer, log: vscode.OutputChannel): void {
+  try {
+    const productPath = getProductJsonPath();
+    if (!fs.existsSync(productPath)) return;
+    const product = JSON.parse(fs.readFileSync(productPath, 'utf-8'));
+    if (!product.checksums?.[CHECKSUM_KEY]) return;
+
+    const actual = computeChecksum(wbContent);
+    if (product.checksums[CHECKSUM_KEY] === actual) {
+      log.appendLine('[Patcher] product.json checksum already correct');
+      return;
+    }
+    updateProductChecksum(actual, log);
+  } catch (err: any) {
+    log.appendLine(`[Patcher] Warning: checksum ensure failed: ${err.message}`);
+  }
+}
+
+/**
  * Updates the workbench checksum in product.json so Cursor's integrity
  * checker sees the file as valid. Reads the current product.json, replaces
  * just the workbench entry, and writes it back atomically.
@@ -461,7 +483,8 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
   const content = fs.readFileSync(wbPath, 'utf-8');
 
   if (content.includes(SENTINEL)) {
-    log.appendLine('[Patcher] Already patched — nothing to do');
+    log.appendLine('[Patcher] Already patched — ensuring checksum is up to date');
+    ensureChecksum(Buffer.from(content, 'utf-8'), log);
     return { patched: true, alreadyPatched: true };
   }
 
@@ -542,12 +565,7 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
   }
 
   // Update product.json checksum so Cursor's integrity check passes
-  try {
-    const newChecksum = computeChecksum(Buffer.from(patchedContent, 'utf-8'));
-    updateProductChecksum(newChecksum, log);
-  } catch (err: any) {
-    log.appendLine(`[Patcher] Warning: could not update product.json checksum: ${err.message}`);
-  }
+  ensureChecksum(Buffer.from(patchedContent, 'utf-8'), log);
 
   log.appendLine('[Patcher] Patch applied successfully');
   return { patched: true, alreadyPatched: false, backupPath };
@@ -563,13 +581,7 @@ export async function removePatch(log: vscode.OutputChannel): Promise<boolean> {
     fs.unlinkSync(backupPath);
 
     // Restore the original checksum in product.json
-    try {
-      const restoredContent = fs.readFileSync(wbPath);
-      const originalChecksum = computeChecksum(restoredContent);
-      updateProductChecksum(originalChecksum, log);
-    } catch (err: any) {
-      log.appendLine(`[Patcher] Warning: could not restore product.json checksum: ${err.message}`);
-    }
+    ensureChecksum(fs.readFileSync(wbPath), log);
 
     return true;
   }
