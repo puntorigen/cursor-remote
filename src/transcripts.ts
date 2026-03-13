@@ -44,6 +44,10 @@ export function slugToPath(slug: string): string {
   return '/' + slug.replace(/-/g, '/');
 }
 
+export function pathToSlug(fsPath: string): string {
+  return fsPath.replace(/^\//, '').replace(/\//g, '-');
+}
+
 export function listProjects(): ProjectInfo[] {
   if (!fs.existsSync(CURSOR_PROJECTS_DIR)) return [];
 

@@ -117,7 +117,6 @@ async function loadProjects() {
   list.innerHTML = '<div class="loading"><div class="spinner"></div>Loading projects...</div>';
 
   try {
-    // Fetch active workspace info
     try {
       const status = await API.get('/status');
       state.activeWorkspace = status.workspace;
@@ -130,28 +129,42 @@ async function loadProjects() {
       return;
     }
 
-    // Show active workspace banner
+    const withChats = projects.filter((p) => p.chatCount > 0);
+    const withoutChats = projects.filter((p) => !p.chatCount);
+
     const activeBanner = state.activeWorkspaceName
       ? `<div class="active-workspace">Connected to: <strong>${escHtml(state.activeWorkspaceName)}</strong> — messages will be sent here</div>`
       : '';
 
-    list.innerHTML = activeBanner + projects
-      .map(
-        (p) => {
-          const timeAgo = p.lastModified ? formatTimeAgo(p.lastModified) : '';
-          const chats = p.chatCount ? `${p.chatCount} chat${p.chatCount !== 1 ? 's' : ''}` : 'no chats';
-          const isActive = state.activeWorkspace && p.path === state.activeWorkspace;
-          const activeClass = isActive ? ' active-project' : '';
-          const activeTag = isActive ? '<span class="active-tag">LIVE</span>' : '';
-          return `
-        <div class="list-item${activeClass}" data-slug="${p.slug}" data-path="${escAttr(p.path)}" data-name="${escAttr(p.name)}">
-          <span class="title">${escHtml(p.name)} ${activeTag}</span>
-          <span class="meta">${chats}${timeAgo ? ` · ${timeAgo}` : ''}</span>
-          <span class="preview">${escHtml(p.path)}</span>
+    let html = activeBanner;
+
+    if (withChats.length > 0) {
+      html += withChats.map((p) => renderProjectItem(p)).join('');
+    } else {
+      html += '<div class="empty"><h3>No conversations yet</h3><p>Start a chat in Cursor to see it here</p></div>';
+    }
+
+    if (withoutChats.length > 0) {
+      html += `
+        <div class="section-divider" id="emptyProjectsToggle">
+          <span class="section-label">Other projects (${withoutChats.length})</span>
+          <svg class="section-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div id="emptyProjectsList" class="collapsed-section">
+          ${withoutChats.map((p) => renderProjectItem(p)).join('')}
         </div>`;
-        }
-      )
-      .join('');
+    }
+
+    list.innerHTML = html;
+
+    const toggle = document.getElementById('emptyProjectsToggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        const section = document.getElementById('emptyProjectsList');
+        const expanded = section.classList.toggle('expanded');
+        toggle.classList.toggle('expanded', expanded);
+      });
+    }
 
     list.querySelectorAll('.list-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -165,6 +178,20 @@ async function loadProjects() {
   } catch (err) {
     list.innerHTML = `<div class="empty"><h3>Error</h3><p>${escHtml(err.message)}</p></div>`;
   }
+}
+
+function renderProjectItem(p) {
+  const timeAgo = p.lastModified ? formatTimeAgo(p.lastModified) : '';
+  const chats = p.chatCount ? `${p.chatCount} chat${p.chatCount !== 1 ? 's' : ''}` : 'no chats';
+  const isActive = state.activeWorkspace && p.path === state.activeWorkspace;
+  const activeClass = isActive ? ' active-project' : '';
+  const activeTag = isActive ? '<span class="active-tag">LIVE</span>' : '';
+  return `
+    <div class="list-item${activeClass}" data-slug="${p.slug}" data-path="${escAttr(p.path)}" data-name="${escAttr(p.name)}">
+      <span class="title">${escHtml(p.name)} ${activeTag}</span>
+      <span class="meta">${chats}${timeAgo ? ` · ${timeAgo}` : ''}</span>
+      <span class="preview">${escHtml(p.path)}</span>
+    </div>`;
 }
 
 // ── Chats ──
@@ -406,7 +433,11 @@ async function sendMessage() {
   scrollToBottom();
 
   try {
-    const result = await API.post('/send', { message: text });
+    const result = await API.post('/send', {
+      message: text,
+      slug: state.currentProject || undefined,
+      composerId: state.currentChat || undefined,
+    });
     if (!result.success) {
       showToast(`Failed: ${result.error || 'Unknown error'}`, 'error');
     } else {

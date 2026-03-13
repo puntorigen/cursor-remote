@@ -1,3 +1,4 @@
+import * as http from 'http';
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { MessageInjector } from './injector';
@@ -6,13 +7,17 @@ import { TunnelManager } from './tunnel';
 import { generateQrSvg } from './qr';
 import { ensurePatch, applyPatch, removePatch, isPatchApplied } from './patcher';
 import { checkForUpdate, performUpdate } from './updater';
+import { pathToSlug } from './transcripts';
 
 let server: RemoteServer | null = null;
 let tunnel: TunnelManager | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let authToken: string;
 let serverRunning = false;
-let currentPort = 7842;
+let actualPort = 0;
+let isPrimary = false;
+
+const PRIMARY_PORT = 7842;
 
 export async function activate(context: vscode.ExtensionContext) {
   const log = vscode.window.createOutputChannel('Cursor Remote');
@@ -22,12 +27,10 @@ export async function activate(context: vscode.ExtensionContext) {
   log.appendLine(`[Extension] Auth token generated`);
 
   const config = vscode.workspace.getConfiguration('cursorRemote');
-  const port = config.get<number>('port', 7842);
+  const configPort = config.get<number>('port', PRIMARY_PORT);
   const autoStart = config.get<boolean>('autoStart', true);
   const autoTunnel = config.get<boolean>('autoTunnel', true);
 
-  // Silently patch Cursor's workbench JS on first activation and auto-reload.
-  // On subsequent activations this is a fast no-op (sentinel check).
   const patchReady = await ensurePatch(context, log);
   if (!patchReady) {
     log.appendLine('[Extension] Patch not active yet — injection will use clipboard fallback');
@@ -42,14 +45,12 @@ export async function activate(context: vscode.ExtensionContext) {
   tunnel.setOnUrlChange((url) => {
     if (url) {
       server?.setTunnelUrl(url);
-      updateStatusBar(port, url);
+      updateStatusBar(url);
     } else {
-      updateStatusBar(port, null);
+      updateStatusBar(null);
       statusBarItem.text = '$(sync~spin) Cursor Remote (reconnecting...)';
     }
   });
-
-  currentPort = port;
 
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -59,14 +60,14 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('cursorRemote.menu', () => showMenu(context, port, log))
+    vscode.commands.registerCommand('cursorRemote.menu', () => showMenu(context, log))
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.start', async () => {
-      const started = await startServer(port, log);
-      if (started && config.get<boolean>('autoTunnel', true)) {
-        await startTunnel(port, log);
+      const started = await startServer(configPort, log);
+      if (started && isPrimary && autoTunnel) {
+        await startTunnel(actualPort, log);
       }
     })
   );
@@ -79,11 +80,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.startTunnel', async () => {
+      if (!isPrimary) {
+        vscode.window.showInformationMessage('Tunnel can only run on the primary window (the first one started).');
+        return;
+      }
       if (tunnel?.isRunning()) {
         vscode.window.showInformationMessage('Tunnel is already running.');
         return;
       }
-      await startTunnel(port, log);
+      await startTunnel(actualPort, log);
     })
   );
 
@@ -102,7 +107,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.showUrl', () => {
       const tunnelUrl = tunnel?.getUrl();
-      const localUrl = `http://localhost:${port}/?token=${authToken}`;
+      const localUrl = `http://localhost:${actualPort || configPort}/?token=${authToken}`;
       const fullUrl = tunnelUrl ? `${tunnelUrl}/?token=${authToken}` : localUrl;
 
       if (tunnelUrl) {
@@ -181,14 +186,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   if (autoStart) {
-    const started = await startServer(port, log);
+    const started = await startServer(configPort, log);
 
-    if (started && autoTunnel) {
-      await startTunnel(port, log);
+    if (started && isPrimary && autoTunnel) {
+      await startTunnel(actualPort, log);
     }
   }
 
-  // Auto-check for updates after a short delay (non-blocking)
   setTimeout(() => checkForUpdate(context, log).catch(() => {}), 5_000);
 
   log.appendLine('[Extension] Cursor Remote activated.');
@@ -203,7 +207,7 @@ async function startTunnel(port: number, log: vscode.OutputChannel) {
   const tunnelUrl = await tunnel.start(port);
   if (tunnelUrl) {
     server?.setTunnelUrl(tunnelUrl);
-    updateStatusBar(port, tunnelUrl);
+    updateStatusBar(tunnelUrl);
     const fullUrl = `${tunnelUrl}/?token=${authToken}`;
     log.appendLine(`[Extension] Tunnel ready: ${fullUrl}`);
 
@@ -221,55 +225,121 @@ async function startTunnel(port: number, log: vscode.OutputChannel) {
         }
       });
   } else {
-    updateStatusBar(port, null);
+    updateStatusBar(null);
     log.appendLine('[Extension] Tunnel not started (cloudflared not available or user skipped)');
   }
 }
 
-async function startServer(port: number, log: vscode.OutputChannel): Promise<boolean> {
+async function startServer(configPort: number, log: vscode.OutputChannel): Promise<boolean> {
   if (!server) return false;
   try {
-    await server.start(port);
+    actualPort = await server.startWithRetry(configPort);
+    isPrimary = actualPort === configPort;
     serverRunning = true;
-    updateStatusBar(port, tunnel?.getUrl() || null);
-    log.appendLine(`[Extension] Server started on port ${port}`);
+
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
+    const slug = wsFolder ? pathToSlug(wsFolder.uri.fsPath) : null;
+
+    if (isPrimary) {
+      log.appendLine(`[Extension] Primary window on port ${actualPort}`);
+      if (slug) {
+        server.registerWindow(slug, wsFolder!.uri.fsPath, actualPort);
+      }
+    } else {
+      log.appendLine(`[Extension] Secondary window on port ${actualPort} (primary at :${configPort})`);
+      if (slug) {
+        registerWithPrimary(slug, wsFolder!.uri.fsPath, actualPort, configPort, log);
+      }
+    }
+
+    updateStatusBar(tunnel?.getUrl() || null);
+    log.appendLine(`[Extension] Server started on port ${actualPort}`);
     return true;
   } catch (err: any) {
-    if (err.code === 'EADDRINUSE') {
-      log.appendLine(`[Extension] Port ${port} already in use — another Cursor window is running the server`);
-      serverRunning = false;
-      statusBarItem.text = '$(circle-slash) Remote (other window)';
-      statusBarItem.tooltip = `Port ${port} in use by another Cursor window`;
-      statusBarItem.show();
-      return false;
-    }
     log.appendLine(`[Extension] Failed to start server: ${err.message}`);
     vscode.window.showErrorMessage(`Cursor Remote failed to start: ${err.message}`);
     return false;
   }
 }
 
+function registerWithPrimary(
+  slug: string,
+  workspace: string,
+  myPort: number,
+  primaryPort: number,
+  log: vscode.OutputChannel,
+) {
+  const data = JSON.stringify({ slug, workspace, port: myPort });
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port: primaryPort,
+    path: '/api/_register',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(data),
+    },
+  }, (res) => {
+    let body = '';
+    res.on('data', (c) => { body += c; });
+    res.on('end', () => {
+      log.appendLine(`[Extension] Registered with primary: ${res.statusCode} ${body}`);
+    });
+  });
+  req.on('error', (err) => {
+    log.appendLine(`[Extension] Failed to register with primary: ${err.message}`);
+  });
+  req.write(data);
+  req.end();
+}
+
+function unregisterFromPrimary(
+  myPort: number,
+  primaryPort: number,
+  log: vscode.OutputChannel,
+) {
+  const data = JSON.stringify({ port: myPort });
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port: primaryPort,
+    path: '/api/_unregister',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(data),
+    },
+  }, () => {
+    log.appendLine(`[Extension] Unregistered from primary`);
+  });
+  req.on('error', () => {});
+  req.write(data);
+  req.end();
+}
+
 async function stopServer(log: vscode.OutputChannel) {
   tunnel?.stop();
   await server?.stop();
   serverRunning = false;
-  updateStatusBar(currentPort, null);
+  updateStatusBar(null);
   log.appendLine('[Extension] Server stopped.');
   vscode.window.showInformationMessage('Cursor Remote stopped.');
 }
 
-function updateStatusBar(port: number, tunnelUrl: string | null) {
+function updateStatusBar(tunnelUrl: string | null) {
+  const portLabel = actualPort || PRIMARY_PORT;
+  const roleLabel = isPrimary ? '' : ' (secondary)';
+
   if (!serverRunning) {
     statusBarItem.text = '$(circle-slash) Cursor Remote (stopped)';
     statusBarItem.tooltip = 'Click to start';
     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   } else if (tunnelUrl) {
-    statusBarItem.text = '$(globe) Cursor Remote';
-    statusBarItem.tooltip = 'Click for options — tunnel active';
+    statusBarItem.text = `$(globe) Cursor Remote${roleLabel}`;
+    statusBarItem.tooltip = `Port ${portLabel} — tunnel active — click for options`;
     statusBarItem.backgroundColor = undefined;
   } else {
-    statusBarItem.text = `$(plug) Cursor Remote :${port}`;
-    statusBarItem.tooltip = `Click for options — local only`;
+    statusBarItem.text = `$(plug) Cursor Remote :${portLabel}${roleLabel}`;
+    statusBarItem.tooltip = `Port ${portLabel} — local only — click for options`;
     statusBarItem.backgroundColor = undefined;
   }
   statusBarItem.show();
@@ -277,11 +347,11 @@ function updateStatusBar(port: number, tunnelUrl: string | null) {
 
 async function showMenu(
   context: vscode.ExtensionContext,
-  port: number,
   log: vscode.OutputChannel,
 ) {
   const tunnelUrl = tunnel?.getUrl();
-  const localUrl = `http://localhost:${port}/?token=${authToken}`;
+  const portLabel = actualPort || PRIMARY_PORT;
+  const localUrl = `http://localhost:${portLabel}/?token=${authToken}`;
   const fullUrl = tunnelUrl ? `${tunnelUrl}/?token=${authToken}` : localUrl;
 
   interface MenuItem extends vscode.QuickPickItem {
@@ -292,7 +362,7 @@ async function showMenu(
 
   if (!serverRunning) {
     items.push(
-      { label: '$(play) Start Server', description: `Port ${port}`, action: 'start' },
+      { label: '$(play) Start Server', description: `Port ${portLabel}`, action: 'start' },
       { label: '$(output) View Logs', action: 'logs' },
       { label: '$(cloud-download) Check for Updates', action: 'check-updates' },
     );
@@ -302,7 +372,7 @@ async function showMenu(
         { label: '$(link) Show QR Code', description: 'Scan with your phone', action: 'qr' },
         { label: '$(clippy) Copy Public URL', description: tunnelUrl, action: 'copy-tunnel' },
       );
-    } else {
+    } else if (isPrimary) {
       items.push(
         { label: '$(cloud-upload) Start Tunnel', description: 'Expose via cloudflared', action: 'start-tunnel' },
       );
@@ -318,19 +388,22 @@ async function showMenu(
   }
 
   const picked = await vscode.window.showQuickPick(items, {
-    title: 'Cursor Remote',
-    placeHolder: serverRunning ? 'Server running' : 'Server stopped',
+    title: `Cursor Remote${isPrimary ? ' (primary)' : ' (secondary)'}`,
+    placeHolder: serverRunning ? `Server running on :${portLabel}` : 'Server stopped',
   });
 
   if (!picked) return;
 
   switch (picked.action) {
-    case 'start':
-      await startServer(port, log);
-      if (vscode.workspace.getConfiguration('cursorRemote').get<boolean>('autoTunnel', true)) {
-        await startTunnel(port, log);
+    case 'start': {
+      const config = vscode.workspace.getConfiguration('cursorRemote');
+      const cfgPort = config.get<number>('port', PRIMARY_PORT);
+      await startServer(cfgPort, log);
+      if (isPrimary && config.get<boolean>('autoTunnel', true)) {
+        await startTunnel(actualPort, log);
       }
       break;
+    }
     case 'stop':
       await stopServer(log);
       break;
@@ -350,7 +423,7 @@ async function showMenu(
       vscode.window.showInformationMessage('Auth token copied to clipboard.');
       break;
     case 'start-tunnel':
-      await startTunnel(port, log);
+      await startTunnel(actualPort, log);
       break;
     case 'logs':
       log.show();
@@ -471,6 +544,10 @@ function escapeHtml(s: string): string {
 }
 
 export function deactivate() {
+  const log = vscode.window.createOutputChannel('Cursor Remote');
+  if (!isPrimary && actualPort && serverRunning) {
+    unregisterFromPrimary(actualPort, PRIMARY_PORT, log);
+  }
   tunnel?.stop();
   return server?.stop();
 }

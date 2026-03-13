@@ -19,6 +19,12 @@ function parseCookie(cookieStr: string, name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+export interface WindowEntry {
+  slug: string;
+  workspace: string;
+  port: number;
+}
+
 export class RemoteServer {
   private app: express.Express;
   private server: http.Server | null = null;
@@ -26,6 +32,10 @@ export class RemoteServer {
   private injector: MessageInjector;
   private log: vscode.OutputChannel;
   private tunnelUrl: string | null = null;
+  private boundPort: number = 0;
+
+  /** slug -> { slug, workspace, port } — only maintained on the primary */
+  private registry = new Map<string, WindowEntry>();
 
   constructor(
     injector: MessageInjector,
@@ -40,11 +50,101 @@ export class RemoteServer {
     this.setupRoutes();
   }
 
+  // ── Registry ────────────────────────────────────────────────────────────
+
+  registerWindow(slug: string, workspace: string, port: number) {
+    this.registry.set(slug, { slug, workspace, port });
+    this.log.appendLine(`[Registry] Registered ${slug} -> :${port} (${workspace})`);
+  }
+
+  unregisterByPort(port: number) {
+    for (const [slug, entry] of this.registry) {
+      if (entry.port === port) {
+        this.registry.delete(slug);
+        this.log.appendLine(`[Registry] Unregistered ${slug} (:${port})`);
+        return;
+      }
+    }
+  }
+
+  getRegistry(): WindowEntry[] {
+    return [...this.registry.values()];
+  }
+
+  private getPortForSlug(slug: string): number | null {
+    return this.registry.get(slug)?.port ?? null;
+  }
+
+  // ── Proxy ───────────────────────────────────────────────────────────────
+
+  /**
+   * Proxies a request to another window's server on localhost.
+   * Used by the primary gateway to forward window-specific requests.
+   */
+  private proxyRequest(
+    targetPort: number,
+    req: express.Request,
+    res: express.Response,
+  ): void {
+    const bodyStr = JSON.stringify(req.body);
+    const options: http.RequestOptions = {
+      hostname: '127.0.0.1',
+      port: targetPort,
+      path: req.originalUrl,
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(bodyStr),
+        'X-Forwarded-By': 'cursor-remote-gateway',
+      },
+    };
+
+    const proxyReq = http.request(options, (proxyRes) => {
+      res.status(proxyRes.statusCode ?? 502);
+      for (const [key, val] of Object.entries(proxyRes.headers)) {
+        if (val) res.setHeader(key, val);
+      }
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      this.log.appendLine(`[Proxy] Error forwarding to :${targetPort}: ${err.message}`);
+      res.status(502).json({ error: `Proxy error: ${err.message}` });
+    });
+
+    proxyReq.write(bodyStr);
+    proxyReq.end();
+  }
+
+  /**
+   * If slug maps to a different window, proxy the request there.
+   * Returns true if proxied (caller should not handle further).
+   */
+  private maybeProxy(
+    slug: string | undefined,
+    req: express.Request,
+    res: express.Response,
+  ): boolean {
+    if (!slug) return false;
+    const targetPort = this.getPortForSlug(slug);
+    if (!targetPort || targetPort === this.boundPort) return false;
+    this.log.appendLine(`[Proxy] Routing ${req.path} for slug=${slug} -> :${targetPort}`);
+    this.proxyRequest(targetPort, req, res);
+    return true;
+  }
+
+  // ── Middleware ───────────────────────────────────────────────────────────
+
   private setupMiddleware() {
     this.app.use(express.json());
 
     this.app.use((req, res, next) => {
-      // Public paths that never need auth (assets loaded by the authenticated page)
+      // Internal registration endpoints from other windows — no auth needed
+      // (localhost-only, not exposed via tunnel)
+      if (req.path.startsWith('/api/_') && req.headers['x-forwarded-by'] !== 'cursor-remote-gateway') {
+        return next();
+      }
+
       const publicPaths = ['/manifest.json', '/favicon.ico'];
       if (
         req.path.startsWith('/static/') ||
@@ -53,7 +153,11 @@ export class RemoteServer {
         return next();
       }
 
-      // For the root page, accept token from query string and set a cookie
+      // Proxied requests from gateway are trusted
+      if (req.headers['x-forwarded-by'] === 'cursor-remote-gateway') {
+        return next();
+      }
+
       if (req.path === '/') {
         const tokenFromQuery = req.query.token as string;
         if (tokenFromQuery === this.authToken) {
@@ -69,7 +173,6 @@ export class RemoteServer {
         }
       }
 
-      // For API paths, check Authorization header, query param, or cookie
       const authHeader = req.headers.authorization;
       const tokenFromQuery = req.query.token as string;
       const cookieToken = parseCookie(req.headers.cookie || '', 'cr_token');
@@ -87,6 +190,8 @@ export class RemoteServer {
     });
   }
 
+  // ── Routes ──────────────────────────────────────────────────────────────
+
   private setupRoutes() {
     this.app.get('/', (_req, res) => {
       const webviewPath = path.join(__dirname, '..', 'webview', 'index.html');
@@ -103,8 +208,6 @@ export class RemoteServer {
       const webviewDir = path.join(__dirname, '..', 'webview');
       const fileName = path.basename(req.params.file);
       const filePath = path.join(webviewDir, fileName);
-
-      this.log.appendLine(`[Server] Static request: ${req.params.file} -> ${filePath} (exists: ${fs.existsSync(filePath)})`);
 
       if (!fs.existsSync(filePath)) {
         res.status(404).send(`Not found: ${fileName}`);
@@ -125,6 +228,34 @@ export class RemoteServer {
       res.type(contentType).send(content);
     });
 
+    // ── Internal registration (no auth) ─────────────────────────────────
+
+    this.app.post('/api/_register', (req, res) => {
+      const { slug, workspace, port } = req.body;
+      if (!slug || !port) {
+        res.status(400).json({ error: 'slug and port required' });
+        return;
+      }
+      this.registerWindow(slug, workspace || '', port);
+      res.json({ ok: true });
+    });
+
+    this.app.post('/api/_unregister', (req, res) => {
+      const { port } = req.body;
+      if (!port) {
+        res.status(400).json({ error: 'port required' });
+        return;
+      }
+      this.unregisterByPort(port);
+      res.json({ ok: true });
+    });
+
+    this.app.get('/api/_registry', (_req, res) => {
+      res.json(this.getRegistry());
+    });
+
+    // ── Read-only endpoints (served from any window, no proxy needed) ───
+
     this.app.get('/api/status', (_req, res) => {
       const wsFolder = vscode.workspace.workspaceFolders?.[0];
       const wsPath = wsFolder?.uri.fsPath || null;
@@ -136,6 +267,8 @@ export class RemoteServer {
         injectionMethod: this.injector.getMethod(),
         patchAvailable: this.injector.isPatchAvailable(),
         tunnelUrl: this.tunnelUrl,
+        boundPort: this.boundPort,
+        registry: this.getRegistry(),
         uptime: process.uptime(),
       });
     });
@@ -214,16 +347,21 @@ export class RemoteServer {
       }
     });
 
+    // ── Window-specific endpoints (may proxy to correct window) ─────────
+
     this.app.post('/api/send', async (req, res) => {
       try {
-        const { message, composerId } = req.body;
+        const { message, composerId, slug } = req.body;
         if (!message || typeof message !== 'string') {
           res.status(400).json({ error: 'message field required' });
           return;
         }
+        if (this.maybeProxy(slug, req, res)) return;
+
         this.log.appendLine(
-          `[Server] Received message from remote: ${message.slice(0, 80)}...` +
-          (composerId ? ` (composer: ${composerId})` : '')
+          `[Server] Message from remote: ${message.slice(0, 80)}...` +
+          (composerId ? ` (composer: ${composerId})` : '') +
+          (slug ? ` (slug: ${slug})` : '')
         );
         const result = await this.injector.send(message, composerId);
         res.json(result);
@@ -248,8 +386,11 @@ export class RemoteServer {
       }
     });
 
-    this.app.get('/api/composers', async (_req, res) => {
+    this.app.get('/api/composers', async (req, res) => {
       try {
+        const slug = req.query.slug as string | undefined;
+        if (this.maybeProxy(slug, req, res)) return;
+
         const state = await this.injector.getComposerState();
         res.json(state);
       } catch (err: any) {
@@ -259,11 +400,13 @@ export class RemoteServer {
 
     this.app.post('/api/set-text', async (req, res) => {
       try {
-        const { text, composerId } = req.body;
+        const { text, composerId, slug } = req.body;
         if (!text || typeof text !== 'string') {
           res.status(400).json({ error: 'text field required' });
           return;
         }
+        if (this.maybeProxy(slug, req, res)) return;
+
         const result = await this.injector.setText(text, composerId);
         res.json(result);
       } catch (err: any) {
@@ -288,15 +431,40 @@ export class RemoteServer {
     this.tunnelUrl = url;
   }
 
-  start(port: number): Promise<void> {
+  getBoundPort(): number {
+    return this.boundPort;
+  }
+
+  start(port: number): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer(this.app);
       this.server.listen(port, '0.0.0.0', () => {
+        this.boundPort = port;
         this.log.appendLine(`[Server] Listening on http://localhost:${port}`);
-        resolve();
+        resolve(port);
       });
       this.server.on('error', reject);
     });
+  }
+
+  /**
+   * Try binding to `startPort`, incrementing up to `maxRetries` times on EADDRINUSE.
+   * Returns the actual port bound.
+   */
+  async startWithRetry(startPort: number, maxRetries = 10): Promise<number> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const port = startPort + attempt;
+      try {
+        return await this.start(port);
+      } catch (err: any) {
+        if (err.code === 'EADDRINUSE' && attempt < maxRetries) {
+          this.log.appendLine(`[Server] Port ${port} in use, trying ${port + 1}...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error(`All ports ${startPort}-${startPort + maxRetries} in use`);
   }
 
   stop(): Promise<void> {
