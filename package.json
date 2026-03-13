@@ -1,0 +1,103 @@
+{
+  "name": "cursor-remote",
+  "displayName": "Cursor Remote",
+  "description": "Control your Cursor IDE sessions from your iPhone. Read conversations, send messages, and track file changes via a mobile-optimized web UI.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "author": "Pablo Schaffner",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cursorRemote.menu",
+        "title": "Cursor Remote: Show Menu"
+      },
+      {
+        "command": "cursorRemote.start",
+        "title": "Cursor Remote: Start Server"
+      },
+      {
+        "command": "cursorRemote.stop",
+        "title": "Cursor Remote: Stop Server"
+      },
+      {
+        "command": "cursorRemote.showToken",
+        "title": "Cursor Remote: Show Auth Token"
+      },
+      {
+        "command": "cursorRemote.showUrl",
+        "title": "Cursor Remote: Show URL + QR Code"
+      },
+      {
+        "command": "cursorRemote.startTunnel",
+        "title": "Cursor Remote: Start Tunnel"
+      },
+      {
+        "command": "cursorRemote.diagnostics",
+        "title": "Cursor Remote: Run Diagnostics"
+      },
+      {
+        "command": "cursorRemote.applyPatch",
+        "title": "Cursor Remote: Apply Patch"
+      },
+      {
+        "command": "cursorRemote.removePatch",
+        "title": "Cursor Remote: Remove Patch"
+      }
+    ],
+    "configuration": {
+      "title": "Cursor Remote",
+      "properties": {
+        "cursorRemote.port": {
+          "type": "number",
+          "default": 7842,
+          "description": "Port for the local HTTP server"
+        },
+        "cursorRemote.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the server when Cursor opens"
+        },
+        "cursorRemote.autoTunnel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start cloudflared tunnel on activation"
+        },
+        "cursorRemote.pollInterval": {
+          "type": "number",
+          "default": 2000,
+          "description": "Polling interval in ms for transcript updates (used by mobile client)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --sourcemap",
+    "watch": "npm run build -- --watch",
+    "package": "vsce package --no-dependencies",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "qrcode": "^1.5.4"
+  }
+}

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Cursor Remote</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Bar -->
+    <header id="topBar">
+      <button id="backBtn" class="icon-btn hidden" aria-label="Back">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div id="headerTitle">
+        <h1>Cursor Remote</h1>
+        <span id="headerSub" class="sub"></span>
+      </div>
+      <button id="statusBtn" class="icon-btn" aria-label="Status">
+        <span id="statusDot" class="dot dot-green"></span>
+      </button>
+    </header>
+
+    <!-- Views -->
+    <main id="mainContent">
+      <!-- Project List -->
+      <div id="projectsView" class="view active">
+        <div class="view-header">
+          <h2>Projects</h2>
+        </div>
+        <div id="projectsList" class="list"></div>
+      </div>
+
+      <!-- Chat List -->
+      <div id="chatsView" class="view">
+        <div class="tab-bar">
+          <button class="tab active" data-tab="chats">Chats</button>
+          <button class="tab" data-tab="files">Files <span id="filesBadge" class="badge hidden">0</span></button>
+        </div>
+        <div id="chatsTab" class="tab-content active">
+          <div id="chatsList" class="list"></div>
+        </div>
+        <div id="filesTab" class="tab-content">
+          <div class="sub-tabs">
+            <button class="sub-tab active" data-subtab="git">Git Changes</button>
+            <button class="sub-tab" data-subtab="ai">AI Changes</button>
+          </div>
+          <div id="gitChanges" class="sub-tab-content active">
+            <div id="gitFilesList" class="list"></div>
+          </div>
+          <div id="aiChanges" class="sub-tab-content">
+            <p class="hint">Select a chat to see AI-modified files</p>
+            <div id="aiFilesList" class="list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat View -->
+      <div id="chatView" class="view">
+        <div id="messages" class="messages"></div>
+      </div>
+
+      <!-- Diff View -->
+      <div id="diffView" class="view">
+        <div class="view-header">
+          <h2 id="diffTitle">Diff</h2>
+        </div>
+        <pre id="diffContent" class="diff-content"></pre>
+      </div>
+    </main>
+
+    <!-- Bottom Input Bar -->
+    <footer id="inputBar" class="hidden">
+      <div class="input-wrap">
+        <textarea id="msgInput" rows="1" placeholder="Send a message to Cursor..." autocomplete="off"></textarea>
+        <button id="sendBtn" class="send-btn" aria-label="Send">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+  <script>
+    const TOKEN = '__AUTH_TOKEN__';
+  </script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
