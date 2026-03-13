@@ -1,12 +1,13 @@
 # Changelog
 
-## v1.0.13 — 2026-03-13
+## v1.0.14 — 2026-03-13
 
 ### Fix message delivery to inactive chat tabs
 - Discovered that the transcript JSONL filename UUID IS the Cursor composer ID — they are the same.
 - The patched `_submitChat` and `_setComposerText` commands now call `showAndFocus(composerId)` BEFORE attempting `getHandleIfLoaded`, which activates the chat tab and loads the composer into memory.
 - Added a polling wait loop (up to 2s) for the handle to become available after `showAndFocus`, handling the async loading delay.
 - `resolveComposerId` now passes the transcript UUID through directly as the composer ID instead of falling back to `selectedComposerId` when tabs don't match.
+- Fixed v1.0.13 patch syntax error: replaced IIFE wrapper with inline async arrow for the wait helper, keeping it compatible with the comma-expression injection context.
 - This patch change requires re-patching Cursor (automatic on reload).
 
 ## v1.0.12 — 2026-03-13

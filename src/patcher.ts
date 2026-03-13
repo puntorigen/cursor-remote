@@ -332,13 +332,13 @@ function buildPatchCode(v: DiscoveredVars): string {
   const ES = v.composerEventService;
   const VS = v.composerViewsService;
 
-  // Helper: show/focus a composer and wait for handle to load
+  // Inline helper: showAndFocus then poll for handle (up to 2s)
   const waitForHandle = [
-    `async function _crWaitHandle(ds,vs,id,ms){`,
+    `async(ds,vs,id)=>{`,
       `await vs.showAndFocus(id);`,
       `let h=ds.getHandleIfLoaded(id);`,
       `if(h)return h;`,
-      `for(let w=0;w<ms;w+=50){`,
+      `for(let w=0;w<2000;w+=50){`,
         `await new Promise(r=>setTimeout(r,50));`,
         `h=ds.getHandleIfLoaded(id);`,
         `if(h)return h;`,
@@ -350,16 +350,12 @@ function buildPatchCode(v: DiscoveredVars): string {
   return [
     SENTINEL,
 
-    // Inject the helper as an IIFE-scoped block that also registers commands
-    `void function(){`,
-    waitForHandle,
-
     `${CR}.registerCommand("cursorRemote._submitChat",async(n,e)=>{`,
       `try{`,
         `const t=e.composerId,i=e.text;`,
         `if(!t||!i)return{ok:false,error:"composerId and text required"};`,
         `const ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES});`,
-        `const h=await _crWaitHandle(ds,vs,t,2000);`,
+        `const h=await(${waitForHandle})(ds,vs,t);`,
         `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
@@ -368,14 +364,16 @@ function buildPatchCode(v: DiscoveredVars): string {
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
-    `});`,
+    `})`,
+
+    `,`,
 
     `${CR}.registerCommand("cursorRemote._setComposerText",async(n,e)=>{`,
       `try{`,
         `const t=e.composerId,i=e.text;`,
         `if(!t||typeof i!=="string")return{ok:false,error:"composerId and text required"};`,
         `const ds=n.get(${DS}),es=n.get(${ES}),vs=n.get(${VS});`,
-        `const h=await _crWaitHandle(ds,vs,t,2000);`,
+        `const h=await(${waitForHandle})(ds,vs,t);`,
         `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
@@ -383,7 +381,9 @@ function buildPatchCode(v: DiscoveredVars): string {
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
-    `});`,
+    `})`,
+
+    `,`,
 
     `${CR}.registerCommand("cursorRemote._getState",async(n)=>{`,
       `try{`,
@@ -400,9 +400,7 @@ function buildPatchCode(v: DiscoveredVars): string {
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
-    `});`,
-
-    `}()`,
+    `})`,
   ].join('');
 }
 
