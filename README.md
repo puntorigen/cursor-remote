@@ -38,7 +38,7 @@ A prebuilt `cursor-remote-0.1.0.vsix` is included in the repository. Install it 
 cursor --install-extension cursor-remote-0.1.0.vsix
 ```
 
-Restart Cursor after installation.
+After installing, press `Ctrl+P` (or `Cmd+P` on macOS), type `> Developer: Reload Window`, and hit Enter to activate the extension.
 
 ### From Source
 
