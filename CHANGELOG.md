@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.16 — 2026-03-13
+
+### Fix missing chat titles for inactive chats
+- Chat titles from the global `cursorDiskKV` database only cover recently active composers (about 70% of chats).
+- Added a fallback that reads the per-workspace `composer.composerData` from `workspaceStorage/*/state.vscdb`, which stores titles for ALL composers in that workspace (including old/inactive ones).
+- Maps project slugs to workspace storage folders via `workspace.json` files, with caching.
+- Result: all chats now show their Cursor-generated title instead of the first message.
+
 ## v1.0.15 — 2026-03-13
 
 ### Fix message delivery to inactive chat tabs

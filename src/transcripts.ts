@@ -50,15 +50,18 @@ function getStateDbPath(): string {
 
 /**
  * Batch-read chat titles from Cursor's internal state.vscdb for a list of composer IDs.
- * Returns a Map<composerId, title>. Falls back gracefully if sqlite3 is unavailable.
+ * First checks the global cursorDiskKV table, then falls back to per-workspace
+ * composer.composerData (ItemTable) which stores allComposers with names.
+ * Returns a Map<composerId, title>.
  */
-function getChatTitles(composerIds: string[]): Map<string, string> {
+function getChatTitles(composerIds: string[], projectSlug?: string): Map<string, string> {
   const titles = new Map<string, string>();
   if (composerIds.length === 0) return titles;
 
   const dbPath = getStateDbPath();
   if (!dbPath || !fs.existsSync(dbPath)) return titles;
 
+  // Step 1: global cursorDiskKV (fast per-composer lookup)
   try {
     const placeholders = composerIds.map((id) => `'composerData:${id}'`).join(',');
     const query = `SELECT key, value FROM cursorDiskKV WHERE key IN (${placeholders});`;
@@ -76,6 +79,94 @@ function getChatTitles(composerIds: string[]): Map<string, string> {
           titles.set(composerId, data.name);
         }
       } catch {}
+    }
+  } catch {}
+
+  // Step 2: if any IDs still missing, check workspace-level composer.composerData
+  const missing = composerIds.filter((id) => !titles.has(id));
+  if (missing.length > 0) {
+    const wsDb = projectSlug ? findWorkspaceDb(projectSlug) : undefined;
+    if (wsDb) {
+      const wsTitles = getWorkspaceComposerTitles(wsDb, missing);
+      for (const [id, name] of wsTitles) {
+        titles.set(id, name);
+      }
+    }
+  }
+
+  return titles;
+}
+
+function getWorkspaceStorageDir(): string {
+  switch (process.platform) {
+    case 'darwin':
+      return path.join(os.homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'workspaceStorage');
+    case 'linux':
+      return path.join(os.homedir(), '.config', 'Cursor', 'User', 'workspaceStorage');
+    case 'win32':
+      return path.join(process.env.APPDATA || '', 'Cursor', 'User', 'workspaceStorage');
+    default:
+      return '';
+  }
+}
+
+let _wsDbCache: Map<string, string> | undefined;
+
+/**
+ * Finds the workspace-level state.vscdb for a given project slug by reading
+ * workspace.json files in each workspaceStorage folder. Results are cached.
+ */
+function findWorkspaceDb(projectSlug: string): string | undefined {
+  if (!_wsDbCache) {
+    _wsDbCache = new Map();
+    const storageDir = getWorkspaceStorageDir();
+    if (!storageDir || !fs.existsSync(storageDir)) return undefined;
+
+    for (const entry of fs.readdirSync(storageDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const wsJsonPath = path.join(storageDir, entry.name, 'workspace.json');
+      const dbFile = path.join(storageDir, entry.name, 'state.vscdb');
+      if (!fs.existsSync(wsJsonPath) || !fs.existsSync(dbFile)) continue;
+
+      try {
+        const wsJson = JSON.parse(fs.readFileSync(wsJsonPath, 'utf-8'));
+        const folder: string = wsJson.folder || '';
+        // folder is like "file:///Users/pabloschaffner/Documents/code/okidoki"
+        // Convert to slug format: Users-pabloschaffner-Documents-code-okidoki
+        const fsPath = folder.replace(/^file:\/\//, '').replace(/\/$/, '');
+        if (fsPath) {
+          const slug = fsPath.replace(/^\//, '').replace(/\//g, '-');
+          _wsDbCache.set(slug, dbFile);
+        }
+      } catch {}
+    }
+  }
+
+  return _wsDbCache.get(projectSlug);
+}
+
+/**
+ * Reads composer titles from a workspace-level state.vscdb.
+ * The data is stored in ItemTable under key 'composer.composerData' as a
+ * JSON object with an allComposers array.
+ */
+function getWorkspaceComposerTitles(dbPath: string, composerIds: string[]): Map<string, string> {
+  const titles = new Map<string, string>();
+  const idSet = new Set(composerIds);
+
+  try {
+    const raw = execSync(
+      `sqlite3 "${dbPath}" "SELECT value FROM ItemTable WHERE key = 'composer.composerData';"`,
+      { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    if (!raw.trim()) return titles;
+
+    const data = JSON.parse(raw);
+    const allComposers: { composerId: string; name?: string }[] = data.allComposers || [];
+    for (const c of allComposers) {
+      if (c.name && idSet.has(c.composerId)) {
+        titles.set(c.composerId, c.name);
+      }
     }
   } catch {}
 
@@ -183,7 +274,7 @@ export function listChats(projectSlug: string): ChatSummary[] {
     });
   }
 
-  const titles = getChatTitles(chatIds);
+  const titles = getChatTitles(chatIds, projectSlug);
 
   return chatMeta
     .map((m) => ({
