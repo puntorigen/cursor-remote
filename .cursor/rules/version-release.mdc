@@ -16,13 +16,12 @@ When bumping the version in `package.json`, **always** complete every step below
 4. **Package**: `npm run package` — produces `cursor-remote-X.Y.Z.vsix`.
 5. **Delete the old `.vsix`** from the repo root (only one prebuilt vsix should be tracked).
 6. **Commit** with message format: `vX.Y.Z: <short description of changes>`
-7. **Push** with large buffer: `git -c http.postBuffer=157286400 push origin main`
-8. **Create a GitHub Release** so the self-updater can find it:
-
-```bash
-gh release create vX.Y.Z ./cursor-remote-X.Y.Z.vsix \
-  --title "vX.Y.Z" \
-  --notes "Release notes here"
-```
+7. **Tag the release**: `git tag -a vX.Y.Z -m "vX.Y.Z: <short description>"`
+8. **Push** with tags and large buffer: `git -c http.postBuffer=157286400 push origin main --tags`
+9. **Create a GitHub Release** from the tag on github.com so the self-updater can find the `.vsix`:
+   - Go to https://github.com/puntorigen/cursor-remote/releases/new
+   - Select the `vX.Y.Z` tag, set title to `vX.Y.Z`
+   - Attach `cursor-remote-X.Y.Z.vsix` as a release asset
+   - Publish the release
 
 The `.vsix` asset attached to the release is what `src/updater.ts` downloads when users click "Update Now".
