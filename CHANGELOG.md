@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.30 — 2026-03-14
+
+### Windows elevation for patching protected installations
+- **Fixed**: When Cursor is installed in `C:\Program Files` (system-wide install), the patcher now automatically handles the EPERM error by using an elevated write strategy.
+- First tries `icacls` to grant write access to the workbench directory.
+- Falls back to spawning an elevated `cmd.exe` via PowerShell `Start-Process -Verb RunAs` to copy the patched file into place (triggers a single UAC prompt on the desktop).
+- Post-elevation verification ensures the patch was actually written.
+- Checksum update failures on protected directories are now non-fatal (logged as warnings).
+
 ## v1.0.29 — 2026-03-14
 
 ### Windows patch fix — ASAR support and remote diagnostics

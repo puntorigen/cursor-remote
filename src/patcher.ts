@@ -32,6 +32,7 @@ import * as path from 'path';
 import * as vm from 'vm';
 import * as crypto from 'crypto';
 import * as os from 'os';
+import * as cp from 'child_process';
 import * as vscode from 'vscode';
 
 const SENTINEL = '/* __CURSOR_REMOTE_PATCHED__ */';
@@ -558,6 +559,124 @@ function validatePatchSyntax(patchCode: string): string | null {
   }
 }
 
+// ─── Elevated write (Windows) ────────────────────────────────────────────────
+
+/**
+ * When Cursor is installed in C:\Program Files (or another protected dir),
+ * normal writes fail with EPERM. We write the patched content to a temp dir,
+ * then use PowerShell Start-Process -Verb RunAs to run a helper script that
+ * copies the files into place. The UAC elevation prompt fires once on the
+ * desktop; this is standard Windows behaviour for system-installed apps.
+ *
+ * For headless/remote scenarios where UAC can't be approved interactively,
+ * we also try a direct `icacls` grant on the workbench dir first.
+ */
+async function elevatedPatchWrite(
+  wbPath: string,
+  backupPath: string,
+  patchedContent: string,
+  log: vscode.OutputChannel,
+): Promise<{ ok: boolean; error?: string }> {
+  const tmpDir = path.join(os.tmpdir(), 'cursor-remote-patch');
+  try { realFs.mkdirSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+
+  const tmpPatched = path.join(tmpDir, 'workbench.desktop.main.js');
+  const tmpScript  = path.join(tmpDir, 'apply-patch.bat');
+
+  // Write patched content to temp
+  realFs.writeFileSync(tmpPatched, patchedContent, 'utf-8');
+  log.appendLine(`[Patcher] Wrote patched file to temp: ${tmpPatched}`);
+
+  // Build a batch script that does the backup + copy
+  const bat = [
+    '@echo off',
+    `if not exist "${backupPath}" (`,
+    `  copy /Y "${wbPath}" "${backupPath}"`,
+    `  if errorlevel 1 (`,
+    `    echo BACKUP_FAILED`,
+    `    exit /b 1`,
+    `  )`,
+    `)`,
+    `copy /Y "${tmpPatched}" "${wbPath}"`,
+    `if errorlevel 1 (`,
+    `  echo COPY_FAILED`,
+    `  exit /b 1`,
+    `)`,
+    `echo PATCH_OK`,
+  ].join('\r\n');
+  realFs.writeFileSync(tmpScript, bat, 'utf-8');
+
+  // Strategy 1: try icacls to grant write access to the workbench directory
+  const wbDir = path.dirname(wbPath);
+  try {
+    log.appendLine(`[Patcher] Trying icacls grant on ${wbDir}...`);
+    cp.execSync(
+      `icacls "${wbDir}" /grant "%USERNAME%":F /T /Q`,
+      { timeout: 10_000, windowsHide: true },
+    );
+    // If icacls worked, try the direct write again
+    if (!realFs.existsSync(backupPath)) {
+      realFs.copyFileSync(wbPath, backupPath);
+    }
+    atomicWriteFileSync(wbPath, patchedContent);
+    log.appendLine('[Patcher] Direct write succeeded after icacls grant');
+    cleanupTemp(tmpDir);
+    return { ok: true };
+  } catch (e: any) {
+    log.appendLine(`[Patcher] icacls approach failed: ${e.message}`);
+  }
+
+  // Strategy 2: PowerShell elevation with -Verb RunAs
+  // This shows a UAC prompt on the desktop
+  return new Promise((resolve) => {
+    log.appendLine('[Patcher] Spawning elevated cmd via PowerShell...');
+
+    const psCmd = `Start-Process -FilePath cmd.exe -ArgumentList '/c "${tmpScript}"' -Verb RunAs -Wait -WindowStyle Hidden`;
+    const child = cp.exec(
+      `powershell -NoProfile -Command "${psCmd}"`,
+      { timeout: 30_000, windowsHide: true },
+      (err, _stdout, stderr) => {
+        if (err) {
+          log.appendLine(`[Patcher] Elevated write failed: ${err.message}`);
+          if (stderr) log.appendLine(`[Patcher] stderr: ${stderr}`);
+          cleanupTemp(tmpDir);
+          resolve({
+            ok: false,
+            error: `Elevated write failed: ${err.message}. `
+              + 'Cursor is installed in a protected directory (C:\\Program Files). '
+              + 'Try running Cursor as Administrator once, or re-install Cursor '
+              + 'in your user profile (LOCALAPPDATA\\Programs\\Cursor).',
+          });
+          return;
+        }
+
+        // Verify the patch actually landed
+        try {
+          const verifyContent = realFs.readFileSync(wbPath, 'utf-8');
+          if (verifyContent.includes(SENTINEL)) {
+            log.appendLine('[Patcher] Elevated patch verified successfully');
+            cleanupTemp(tmpDir);
+            resolve({ ok: true });
+          } else {
+            log.appendLine('[Patcher] Elevated write completed but sentinel not found');
+            cleanupTemp(tmpDir);
+            resolve({ ok: false, error: 'Elevated write completed but patch not detected in file' });
+          }
+        } catch (readErr: any) {
+          log.appendLine(`[Patcher] Post-elevation verify failed: ${readErr.message}`);
+          cleanupTemp(tmpDir);
+          resolve({ ok: false, error: `Post-elevation verification failed: ${readErr.message}` });
+        }
+      },
+    );
+    child.unref();
+  });
+}
+
+function cleanupTemp(tmpDir: string): void {
+  try { realFs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
 // ─── Atomic file write ──────────────────────────────────────────────────────
 
 /**
@@ -906,26 +1025,50 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
   log.appendLine('[Patcher] Syntax OK');
 
   const backupPath = getBackupPath();
-  if (!realFs.existsSync(backupPath)) {
-    log.appendLine(`[Patcher] Creating backup: ${backupPath}`);
-    realFs.copyFileSync(wbPath, backupPath);
-  }
 
-  writeRestoreScript(log);
-
-  log.appendLine(`[Patcher] Atomic write (${patchCode.length} bytes injected)`);
+  // Try direct write first; if it fails with EPERM (e.g. C:\Program Files),
+  // fall back to writing via elevated PowerShell on Windows.
+  let needsElevation = false;
   try {
+    if (!realFs.existsSync(backupPath)) {
+      log.appendLine(`[Patcher] Creating backup: ${backupPath}`);
+      realFs.copyFileSync(wbPath, backupPath);
+    }
+
+    writeRestoreScript(log);
+
+    log.appendLine(`[Patcher] Atomic write (${patchCode.length} bytes injected)`);
     atomicWriteFileSync(wbPath, patchedContent);
   } catch (err: any) {
-    return {
-      patched: false,
-      alreadyPatched: false,
-      error: `Failed to write patched file: ${err.message}. Original is intact.`,
-    };
+    if (process.platform === 'win32' && (err.code === 'EPERM' || err.code === 'EACCES')) {
+      needsElevation = true;
+      log.appendLine(`[Patcher] Direct write failed (${err.code}) — will try elevated write`);
+    } else {
+      return {
+        patched: false,
+        alreadyPatched: false,
+        error: `Failed to write patched file: ${err.message}. Original is intact.`,
+      };
+    }
   }
 
-  // Update product.json checksum so Cursor's integrity check passes
-  ensureChecksum(Buffer.from(patchedContent, 'utf-8'), log);
+  if (needsElevation) {
+    log.appendLine('[Patcher] Attempting elevated write via PowerShell...');
+    const elevateResult = await elevatedPatchWrite(wbPath, backupPath, patchedContent, log);
+    if (!elevateResult.ok) {
+      return {
+        patched: false,
+        alreadyPatched: false,
+        error: elevateResult.error!,
+      };
+    }
+  }
+
+  try {
+    ensureChecksum(Buffer.from(patchedContent, 'utf-8'), log);
+  } catch (checksumErr: any) {
+    log.appendLine(`[Patcher] Warning: checksum update failed (${checksumErr.code || checksumErr.message}) — may see integrity warning once`);
+  }
 
   log.appendLine('[Patcher] Patch applied successfully');
   return { patched: true, alreadyPatched: false, backupPath };
