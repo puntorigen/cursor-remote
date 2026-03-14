@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.29 — 2026-03-14
+
+### Windows patch fix — ASAR support and remote diagnostics
+- **Fixed**: Patcher now uses Electron's `original-fs` module to bypass ASAR filesystem interception, which was preventing the workbench file from being found on Windows installations that use ASAR packaging.
+- **Fixed**: Added `app.asar.unpacked` candidate paths for locating the workbench file.
+- **Fixed**: When the workbench file is only visible through ASAR-aware `fs` (inside `app.asar`), the patcher automatically extracts it to a writable location for patching.
+- **Added**: `/api/debug/patcher` endpoint for remote diagnosis of patching issues — shows all candidate paths, which exist on disk vs. inside ASAR, directory listings, and ASAR file detection.
+- **Added**: `/api/debug/patcher/apply` POST endpoint to remotely trigger patch application without needing desktop access.
+- **Fixed**: Web UI now shows a clear warning toast when message injection falls back to clipboard mode ("Patch not applied — message copied to clipboard") instead of showing fake "Sent" success.
+- All patcher file I/O now consistently uses `original-fs` to prevent ASAR interception issues.
+
 ## v1.0.28 — 2026-03-14
 
 ### Syntax-highlighted code blocks and table styling

@@ -48,6 +48,19 @@ let _resolvedWorkbenchPath: string | undefined;
  *
  * Caches the result after the first successful resolution.
  */
+/**
+ * Electron intercepts `fs` calls for paths inside `.asar` archives,
+ * transparently reading from the archive. But we need the *real* disk
+ * file for patching. `original-fs` bypasses the ASAR interception.
+ * If unavailable (non-Electron context), fall back to regular fs.
+ */
+let realFs: typeof fs;
+try {
+  realFs = require('original-fs');
+} catch {
+  realFs = fs;
+}
+
 function getWorkbenchPath(): string {
   if (_resolvedWorkbenchPath) return _resolvedWorkbenchPath;
 
@@ -63,12 +76,19 @@ function getWorkbenchPath(): string {
     if (stripped !== appRoot) {
       candidates.push(path.join(stripped, 'resources', 'app', WORKBENCH_RELATIVE));
     }
+    // On Windows, Cursor may use ASAR packaging: the real file could
+    // be served virtually from app.asar. Check the ASAR path too.
+    const asarRoot = appRoot.replace(/[/\\]resources[/\\]app[/\\]?$/i, '');
+    if (asarRoot !== appRoot) {
+      candidates.push(path.join(asarRoot, 'resources', 'app.asar.unpacked', WORKBENCH_RELATIVE));
+    }
   }
 
   // Strategy 2: derive from process.execPath (e.g. C:\...\Cursor.exe)
   if (process.execPath) {
     const execDir = path.dirname(process.execPath);
     candidates.push(path.join(execDir, 'resources', 'app', WORKBENCH_RELATIVE));
+    candidates.push(path.join(execDir, 'resources', 'app.asar.unpacked', WORKBENCH_RELATIVE));
   }
 
   // Strategy 3: platform defaults
@@ -78,11 +98,14 @@ function getWorkbenchPath(): string {
     );
   } else if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA || '';
-    candidates.push(
-      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE),
-      path.join(localAppData, 'cursor', 'resources', 'app', WORKBENCH_RELATIVE),
-      path.join('C:', 'Program Files', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE),
-    );
+    for (const base of [
+      path.join(localAppData, 'Programs', 'Cursor'),
+      path.join(localAppData, 'cursor'),
+      path.join('C:', 'Program Files', 'Cursor'),
+    ]) {
+      candidates.push(path.join(base, 'resources', 'app', WORKBENCH_RELATIVE));
+      candidates.push(path.join(base, 'resources', 'app.asar.unpacked', WORKBENCH_RELATIVE));
+    }
   } else {
     candidates.push(
       path.join('/opt', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE),
@@ -92,19 +115,78 @@ function getWorkbenchPath(): string {
   }
 
   // Deduplicate and find the first existing file
+  // Use original-fs to see through ASAR interception on Windows
   const seen = new Set<string>();
   for (const candidate of candidates) {
     const normalized = path.resolve(candidate);
     if (seen.has(normalized)) continue;
     seen.add(normalized);
-    if (fs.existsSync(normalized)) {
-      _resolvedWorkbenchPath = normalized;
-      return normalized;
-    }
+    try {
+      if (realFs.existsSync(normalized) && realFs.statSync(normalized).isFile()) {
+        _resolvedWorkbenchPath = normalized;
+        return normalized;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Last resort: try reading through Electron's ASAR-aware fs
+  // If appRoot is inside an ASAR, Electron's fs can read it transparently.
+  // We'll read from the ASAR path and extract to a writable location.
+  if (appRoot) {
+    const asarPath = path.join(appRoot, WORKBENCH_RELATIVE);
+    try {
+      if (fs.existsSync(asarPath)) {
+        // File exists inside ASAR — extract to a real path we can patch
+        const extractedPath = extractFromAsar(asarPath, appRoot);
+        if (extractedPath) {
+          _resolvedWorkbenchPath = extractedPath;
+          return extractedPath;
+        }
+      }
+    } catch { /* ignore */ }
   }
 
   // None found — return the best guess for error messages
   return candidates[0] || path.join('resources', 'app', WORKBENCH_RELATIVE);
+}
+
+/**
+ * When Cursor uses ASAR packaging, the workbench file lives inside
+ * app.asar and is only accessible through Electron's fs interception.
+ * To patch it, we extract the entire app.asar to app/ on disk.
+ *
+ * Returns the path to the extracted workbench file, or null on failure.
+ */
+function extractFromAsar(virtualPath: string, appRoot: string): string | null {
+  try {
+    const asar = require('@electron/asar');
+    const resourcesDir = appRoot.replace(/[/\\]resources[/\\]app[/\\]?$/i, path.sep + 'resources');
+    const asarFile = path.join(resourcesDir, 'app.asar');
+    const extractDir = path.join(resourcesDir, 'app');
+
+    if (!realFs.existsSync(asarFile)) return null;
+    if (!realFs.existsSync(extractDir)) {
+      asar.extractAll(asarFile, extractDir);
+    }
+
+    const extracted = path.join(extractDir, WORKBENCH_RELATIVE);
+    if (realFs.existsSync(extracted)) return extracted;
+  } catch { /* @electron/asar not available or extraction failed */ }
+
+  // Fallback: just read the content through Electron's ASAR-aware fs
+  // and write it to a temporary location we can patch
+  try {
+    const content = fs.readFileSync(virtualPath, 'utf-8');
+    // Determine a writable location alongside the ASAR
+    const resourcesDir = appRoot.replace(/[/\\]resources[/\\]app[/\\]?$/i, path.sep + 'resources');
+    const targetDir = path.join(resourcesDir, 'app', 'out', 'vs', 'workbench');
+    fs.mkdirSync(targetDir, { recursive: true });
+    const targetPath = path.join(targetDir, 'workbench.desktop.main.js');
+    realFs.writeFileSync(targetPath, content, 'utf-8');
+    return targetPath;
+  } catch { /* extraction failed */ }
+
+  return null;
 }
 
 export function getBackupPath(): string {
@@ -493,23 +575,21 @@ function atomicWriteFileSync(targetPath: string, content: string): void {
   const tmpPath = path.join(dir, tmpName);
 
   try {
-    const fd = fs.openSync(tmpPath, 'w');
+    const fd = realFs.openSync(tmpPath, 'w');
     try {
-      fs.writeSync(fd, content, 0, 'utf-8');
-      fs.fsyncSync(fd);
+      realFs.writeSync(fd, content, 0, 'utf-8');
+      realFs.fsyncSync(fd);
     } finally {
-      fs.closeSync(fd);
+      realFs.closeSync(fd);
     }
     try {
-      fs.renameSync(tmpPath, targetPath);
+      realFs.renameSync(tmpPath, targetPath);
     } catch {
-      // Rename fails on Windows when the target is in use; fall back to
-      // copying content and removing the temp file.
-      fs.copyFileSync(tmpPath, targetPath);
-      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      realFs.copyFileSync(tmpPath, targetPath);
+      try { realFs.unlinkSync(tmpPath); } catch { /* ignore */ }
     }
   } catch (err) {
-    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    try { realFs.unlinkSync(tmpPath); } catch { /* ignore */ }
     throw err;
   }
 }
@@ -598,34 +678,176 @@ export interface PatchStatus {
 
 export function isPatchApplied(): boolean {
   const wbPath = getWorkbenchPath();
-  if (!fs.existsSync(wbPath)) return false;
-  const content = fs.readFileSync(wbPath, 'utf-8');
-  return content.includes(SENTINEL);
+  try {
+    if (!realFs.existsSync(wbPath)) return false;
+    const content = realFs.readFileSync(wbPath, 'utf-8');
+    return content.includes(SENTINEL);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns comprehensive diagnostic info about the patcher state —
+ * all candidate paths, what exists, appRoot, execPath, etc.
+ * Used by the /api/debug/patcher endpoint for remote troubleshooting.
+ */
+export function getPatcherDebugInfo(): Record<string, unknown> {
+  const appRoot = vscode.env.appRoot;
+  const execPath = process.execPath;
+  const execDir = path.dirname(execPath);
+  const localAppData = process.env.LOCALAPPDATA || '';
+
+  const candidates: Array<{ path: string; existsReal: boolean; existsAsar: boolean; strategy: string }> = [];
+  const addCandidate = (p: string, strategy: string) => {
+    const normalized = path.resolve(p);
+    let existsReal = false;
+    let existsAsar = false;
+    try { existsReal = realFs.existsSync(normalized); } catch { /* ignore */ }
+    try { existsAsar = fs.existsSync(normalized); } catch { /* ignore */ }
+    candidates.push({ path: normalized, existsReal, existsAsar, strategy });
+  };
+
+  if (appRoot) {
+    addCandidate(path.join(appRoot, WORKBENCH_RELATIVE), 'appRoot direct');
+    const stripped = appRoot.replace(/[/\\]resources[/\\]app[/\\]?$/i, '');
+    if (stripped !== appRoot) {
+      addCandidate(path.join(stripped, 'resources', 'app', WORKBENCH_RELATIVE), 'appRoot stripped');
+    }
+  }
+  addCandidate(path.join(execDir, 'resources', 'app', WORKBENCH_RELATIVE), 'execDir/resources/app');
+
+  if (process.platform === 'win32') {
+    addCandidate(path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE), 'LOCALAPPDATA/Programs/Cursor');
+    addCandidate(path.join(localAppData, 'cursor', 'resources', 'app', WORKBENCH_RELATIVE), 'LOCALAPPDATA/cursor');
+    addCandidate(path.join('C:', 'Program Files', 'Cursor', 'resources', 'app', WORKBENCH_RELATIVE), 'C:/Program Files/Cursor');
+  }
+
+  // Explore actual dir structure around key paths
+  const dirListings: Record<string, string[] | string> = {};
+  const dirsToProbe = [
+    appRoot,
+    path.join(execDir, 'resources'),
+    path.join(execDir, 'resources', 'app'),
+    path.join(execDir, 'resources', 'app', 'out'),
+    path.join(execDir, 'resources', 'app', 'out', 'vs'),
+    path.join(execDir, 'resources', 'app', 'out', 'vs', 'workbench'),
+  ];
+  if (process.platform === 'win32') {
+    dirsToProbe.push(
+      path.join(localAppData, 'Programs', 'Cursor'),
+      path.join(localAppData, 'Programs', 'Cursor', 'resources'),
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app'),
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', 'out'),
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', 'out', 'vs'),
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', 'out', 'vs', 'workbench'),
+    );
+  }
+  for (const d of dirsToProbe) {
+    if (!d) continue;
+    try {
+      // Try realFs first (bypasses ASAR), then fs (ASAR-aware)
+      if (realFs.existsSync(d) && realFs.statSync(d).isDirectory()) {
+        dirListings[d] = realFs.readdirSync(d).slice(0, 30);
+      } else if (fs.existsSync(d) && fs.statSync(d).isDirectory()) {
+        dirListings[d + ' (via asar)'] = fs.readdirSync(d).slice(0, 30);
+      } else {
+        dirListings[d] = '(does not exist)';
+      }
+    } catch (e: any) {
+      dirListings[d] = `(error: ${e.message})`;
+    }
+  }
+
+  const asarPaths: Record<string, { existsReal: boolean; existsAsar: boolean; isFile?: boolean }> = {};
+  const asarCandidates = [
+    path.join(execDir, 'resources', 'app.asar'),
+    path.join(execDir, 'resources', 'app.asar.unpacked'),
+  ];
+  if (process.platform === 'win32') {
+    asarCandidates.push(
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app.asar'),
+      path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app.asar.unpacked'),
+    );
+  }
+  for (const a of asarCandidates) {
+    let existsReal = false;
+    let existsAsar = false;
+    let isFile: boolean | undefined;
+    try { existsReal = realFs.existsSync(a); if (existsReal) isFile = realFs.statSync(a).isFile(); } catch { /* ignore */ }
+    try { existsAsar = fs.existsSync(a); } catch { /* ignore */ }
+    asarPaths[a] = { existsReal, existsAsar, isFile };
+  }
+
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    appRoot,
+    execPath,
+    execDir,
+    localAppData,
+    usingOriginalFs: realFs !== fs,
+    resolvedWorkbenchPath: _resolvedWorkbenchPath || '(not resolved yet)',
+    candidates,
+    dirListings,
+    asarPaths,
+    patchApplied: isPatchApplied(),
+  };
 }
 
 export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus> {
   log.appendLine(`[Patcher] appRoot: ${vscode.env.appRoot || '(empty)'}`);
   log.appendLine(`[Patcher] execPath: ${process.execPath}`);
   log.appendLine(`[Patcher] platform: ${process.platform}/${process.arch}`);
+  log.appendLine(`[Patcher] using original-fs: ${realFs !== fs}`);
 
   const wbPath = getWorkbenchPath();
   log.appendLine(`[Patcher] Target: ${wbPath}`);
 
-  if (!fs.existsSync(wbPath)) {
-    // Log all candidate paths to help debug
+  let fileExists = false;
+  try { fileExists = realFs.existsSync(wbPath); } catch { /* ignore */ }
+
+  if (!fileExists) {
     const execDir = path.dirname(process.execPath);
     const resourcesDir = path.join(execDir, 'resources');
-    log.appendLine(`[Patcher] resources dir exists: ${fs.existsSync(resourcesDir)}`);
+    log.appendLine(`[Patcher] resources dir exists (realFs): ${realFs.existsSync(resourcesDir)}`);
+    log.appendLine(`[Patcher] resources dir exists (fs/asar): ${fs.existsSync(resourcesDir)}`);
+    if (realFs.existsSync(resourcesDir)) {
+      try {
+        const entries = realFs.readdirSync(resourcesDir);
+        log.appendLine(`[Patcher] resources contents (realFs): ${entries.join(', ')}`);
+      } catch {}
+    }
     if (fs.existsSync(resourcesDir)) {
       try {
         const entries = fs.readdirSync(resourcesDir);
-        log.appendLine(`[Patcher] resources contents: ${entries.join(', ')}`);
+        log.appendLine(`[Patcher] resources contents (fs/asar): ${entries.join(', ')}`);
       } catch {}
+    }
+    // On Windows check if the ASAR-aware fs can see it (inside app.asar)
+    const appRoot = vscode.env.appRoot;
+    if (appRoot) {
+      const asarWb = path.join(appRoot, WORKBENCH_RELATIVE);
+      const asarVisible = fs.existsSync(asarWb);
+      log.appendLine(`[Patcher] ASAR-aware fs sees workbench at appRoot: ${asarVisible}`);
+      if (asarVisible) {
+        log.appendLine('[Patcher] Attempting ASAR extraction...');
+        try {
+          const extracted = extractFromAsar(asarWb, appRoot);
+          if (extracted && realFs.existsSync(extracted)) {
+            log.appendLine(`[Patcher] Extracted to: ${extracted}`);
+            _resolvedWorkbenchPath = extracted;
+            return applyPatch(log);
+          }
+        } catch (e: any) {
+          log.appendLine(`[Patcher] ASAR extraction failed: ${e.message}`);
+        }
+      }
     }
     return { patched: false, alreadyPatched: false, error: `Workbench file not found: ${wbPath}` };
   }
 
-  const content = fs.readFileSync(wbPath, 'utf-8');
+  const content = realFs.readFileSync(wbPath, 'utf-8');
 
   if (content.includes(SENTINEL)) {
     log.appendLine('[Patcher] Already patched — ensuring checksum is up to date');
@@ -633,7 +855,6 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
     return { patched: true, alreadyPatched: true };
   }
 
-  // Discover minified variable names from stable string literals
   log.appendLine('[Patcher] Discovering minified variable names...');
   const { vars, errors } = discoverVariables(content);
   if (!vars) {
@@ -655,7 +876,6 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
     + `ViewsService=${vars.composerViewsService}`,
   );
 
-  // Find injection point using stable command ID strings
   log.appendLine('[Patcher] Locating injection point...');
   const injection = findInjectionPoint(content, vars.commandsRegistry);
   if (!injection) {
@@ -669,12 +889,10 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
 
   log.appendLine(`[Patcher] Injection anchor: "${injection.anchor}" at offset ${injection.offset}`);
 
-  // Build the patched content
   const insertAt = injection.offset;
   const patchCode = ',' + buildPatchCode(vars);
   const patchedContent = content.slice(0, insertAt) + patchCode + content.slice(insertAt);
 
-  // Validate the generated patch code in isolation before touching disk
   log.appendLine('[Patcher] Validating patch code syntax...');
   const syntaxError = validatePatchSyntax(patchCode);
   if (syntaxError) {
@@ -687,17 +905,14 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
   }
   log.appendLine('[Patcher] Syntax OK');
 
-  // Create backup (only on first patch — don't overwrite an older backup)
   const backupPath = getBackupPath();
-  if (!fs.existsSync(backupPath)) {
+  if (!realFs.existsSync(backupPath)) {
     log.appendLine(`[Patcher] Creating backup: ${backupPath}`);
-    fs.copyFileSync(wbPath, backupPath);
+    realFs.copyFileSync(wbPath, backupPath);
   }
 
-  // Write the standalone restore script next to the backup
   writeRestoreScript(log);
 
-  // Atomic write: temp file → fsync → rename
   log.appendLine(`[Patcher] Atomic write (${patchCode.length} bytes injected)`);
   try {
     atomicWriteFileSync(wbPath, patchedContent);
@@ -720,14 +935,12 @@ export async function removePatch(log: vscode.OutputChannel): Promise<boolean> {
   const wbPath = getWorkbenchPath();
   const backupPath = getBackupPath();
 
-  if (fs.existsSync(backupPath)) {
+  if (realFs.existsSync(backupPath)) {
     log.appendLine(`[Patcher] Restoring backup: ${backupPath}`);
-    fs.copyFileSync(backupPath, wbPath);
-    fs.unlinkSync(backupPath);
+    realFs.copyFileSync(backupPath, wbPath);
+    realFs.unlinkSync(backupPath);
 
-    // Restore the original checksum in product.json
-    ensureChecksum(fs.readFileSync(wbPath), log);
-
+    ensureChecksum(realFs.readFileSync(wbPath), log);
     return true;
   }
 

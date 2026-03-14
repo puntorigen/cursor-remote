@@ -16,6 +16,7 @@ import {
 } from './transcripts';
 import { getGitStatus, getFileDiff, getGitDiffStat } from './files';
 import { MessageInjector } from './injector';
+import { getPatcherDebugInfo, applyPatch as applyPatchFn } from './patcher';
 
 function parseCookie(cookieStr: string, name: string): string | null {
   const match = cookieStr.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
@@ -445,6 +446,26 @@ export class RemoteServer {
           cursorContents,
           env: { APPDATA: appdata, LOCALAPPDATA: localAppdata },
         });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    this.app.get('/api/debug/patcher', (_req, res) => {
+      try {
+        res.json(getPatcherDebugInfo());
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    this.app.post('/api/debug/patcher/apply', async (_req, res) => {
+      try {
+        const result = await applyPatchFn(this.log);
+        if (result.patched && !result.alreadyPatched) {
+          this.injector.refreshPatchAvailability();
+        }
+        res.json(result);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }

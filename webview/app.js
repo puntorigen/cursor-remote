@@ -503,6 +503,9 @@ async function sendMessage() {
     if (!result.success) {
       showToast(`Failed: ${result.error || 'Unknown error'}`, 'error');
       msgDiv.remove();
+    } else if (result.method === 'clipboard') {
+      msgDiv.remove();
+      showToast('Patch not applied — message copied to clipboard. Paste into Cursor with Ctrl+V / Cmd+V.', 'warning', 5000);
     } else {
       state.messages.push({ role: 'user', content: text });
       state.messageCount = state.messages.length;
@@ -708,9 +711,16 @@ function formatTimeAgo(timestamp) {
   return new Date(timestamp).toLocaleDateString();
 }
 
-function showToast(text, type = 'info') {
+function showToast(text, type = 'info', duration = 3000) {
   const existing = document.querySelector('.toast');
   if (existing) existing.remove();
+
+  const bgColors = {
+    error: '#7f1d1d',
+    success: '#14532d',
+    warning: '#78350f',
+    info: '#1e293b',
+  };
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
@@ -718,11 +728,12 @@ function showToast(text, type = 'info') {
   toast.style.cssText = `
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     padding: 8px 18px; border-radius: 20px; font-size: 13px; z-index: 100;
-    background: ${type === 'error' ? '#7f1d1d' : type === 'success' ? '#14532d' : '#1e293b'};
+    background: ${bgColors[type] || bgColors.info};
     color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 90vw; text-align: center;
   `;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 3000);
+  setTimeout(() => toast.remove(), duration);
 }
 
 // ── Lightbox / File Preview ──

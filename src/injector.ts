@@ -79,6 +79,15 @@ export class MessageInjector {
     return this.patchAvailable;
   }
 
+  async refreshPatchAvailability(): Promise<boolean> {
+    this.patchAvailable = isPatchApplied();
+    this.log.appendLine(`[Injector] Patch availability refreshed: ${this.patchAvailable}`);
+    if (this.patchAvailable) {
+      await this.verifyPatchedCommands();
+    }
+    return this.patchAvailable;
+  }
+
   getMethod(): InjectionMethod {
     return this.lastMethod;
   }
