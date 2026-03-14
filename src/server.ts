@@ -395,7 +395,8 @@ export class RemoteServer {
 
     this.app.get('/api/debug/projects', (_req, res) => {
       try {
-        const projectsDir = path.join(os.homedir(), '.cursor', 'projects');
+        const homedir = os.homedir();
+        const projectsDir = path.join(homedir, '.cursor', 'projects');
         const exists = fs.existsSync(projectsDir);
         const entries: string[] = exists
           ? fs.readdirSync(projectsDir).slice(0, 20)
@@ -406,16 +407,43 @@ export class RemoteServer {
           try {
             if (fs.statSync(full).isDirectory()) {
               details[e] = fs.readdirSync(full);
+              const atDir = path.join(full, 'agent-transcripts');
+              if (fs.existsSync(atDir)) {
+                details[e + '/agent-transcripts'] = fs.readdirSync(atDir).slice(0, 10);
+              }
             }
           } catch {}
         }
+        // Check alternate locations where Cursor might store projects
+        const altPaths: Record<string, boolean> = {};
+        const appdata = process.env.APPDATA || '';
+        const localAppdata = process.env.LOCALAPPDATA || '';
+        for (const alt of [
+          path.join(homedir, '.cursor', 'projects'),
+          path.join(appdata, 'Cursor', 'projects'),
+          path.join(appdata, 'Cursor', 'User', 'projects'),
+          path.join(localAppdata, 'Cursor', 'projects'),
+          path.join(localAppdata, 'cursor', 'projects'),
+          path.join(homedir, '.cursor'),
+        ]) {
+          altPaths[alt] = fs.existsSync(alt);
+        }
+        // Check .cursor dir contents
+        const cursorDir = path.join(homedir, '.cursor');
+        let cursorContents: string[] = [];
+        if (fs.existsSync(cursorDir)) {
+          cursorContents = fs.readdirSync(cursorDir);
+        }
         res.json({
           platform: process.platform,
-          homedir: os.homedir(),
+          homedir,
           projectsDir,
           exists,
           entries,
           details,
+          altPaths,
+          cursorContents,
+          env: { APPDATA: appdata, LOCALAPPDATA: localAppdata },
         });
       } catch (err: any) {
         res.status(500).json({ error: err.message });

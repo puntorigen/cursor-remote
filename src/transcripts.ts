@@ -182,10 +182,25 @@ const TOOL_PATTERNS: Record<string, 'edit' | 'create' | 'delete' | 'read'> = {
 };
 
 export function slugToPath(slug: string): string {
+  if (process.platform === 'win32') {
+    // Slug like "c-Users-josem-OneDrive" → "c:\Users\josem\OneDrive"
+    // First char is drive letter, reconstruct drive: then backslash-separated
+    const parts = slug.split('-');
+    if (parts.length > 1 && parts[0].length === 1) {
+      return parts[0] + ':\\' + parts.slice(1).join('\\');
+    }
+    return slug.replace(/-/g, '\\');
+  }
   return '/' + slug.replace(/-/g, '/');
 }
 
 export function pathToSlug(fsPath: string): string {
+  if (process.platform === 'win32') {
+    // "c:\Users\josem\OneDrive" → "c-Users-josem-OneDrive"
+    return fsPath
+      .replace(/^([a-zA-Z]):[\\\/]/, '$1-')  // drive letter
+      .replace(/[\\\/]/g, '-');
+  }
   return fsPath.replace(/^\//, '').replace(/\//g, '-');
 }
 
