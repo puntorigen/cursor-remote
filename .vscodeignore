@@ -4,3 +4,10 @@ node_modules/**
 tsconfig.json
 .gitignore
 *.map
+brand/brand-guidelines.pdf
+brand/logo-*.png
+brand/icon-transparent.png
+brand/icon-dark.png
+brand/icon-light.png
+brand/favicon.png
+*.vsix

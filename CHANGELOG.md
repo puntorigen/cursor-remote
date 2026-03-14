@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.38 — 2026-03-14
+
+### Brand identity & visual assets
+- **New**: Holographic cube logo — translucent blue glass cube in isometric view with a glowing text cursor caret inside, representing a remote digital workspace.
+- Generated full brand asset suite in `brand/` directory: logo on dark/light backgrounds, wordmark variants, transparent icon, icon-128, and favicon.
+- Created 12-page `brand-guidelines.pdf` covering logo usage, color palette, typography, clear space rules, minimum sizes, and do's/don'ts.
+- **Extension icon**: `package.json` now references `brand/icon-128.png` for the VS Code marketplace listing.
+- **Web UI favicon**: `/favicon.ico` route serves the cube icon; `<link rel="icon">` and `<link rel="apple-touch-icon">` added to `index.html`.
+- **PWA manifest**: `/manifest.json` now includes 128, 256, and 512px icon entries.
+- **QR panel**: Shows the cube logo alongside the "Cursor Remote" heading.
+- **Web UI header**: Displays the cube logo next to the title on all pages.
+- Icons trimmed to remove excess whitespace for crisp display at small sizes.
+
+### Brand system
+- **Primary colors**: Electric Blue (#3B82F6), Cyan Glow (#22D3EE), Deep Navy (#1E3A5F)
+- **Typography**: Inter (display/UI), JetBrains Mono (code)
+- **Minimum sizes**: 16×16px digital icon, 128×128px extension icon, 48×48px favicon
+
 ## v1.0.37 — 2026-03-14
 
 ### Structured JSON queries

@@ -2,10 +2,11 @@
   "name": "cursor-remote",
   "displayName": "Cursor Remote",
   "description": "Control your Cursor IDE sessions from your iPhone. Read conversations, send messages, and track file changes via a mobile-optimized web UI.",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "publisher": "local",
   "author": "Pablo Schaffner",
   "license": "MIT",
+  "icon": "brand/icon-128.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/puntorigen/cursor-remote.git"

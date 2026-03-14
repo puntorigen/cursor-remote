@@ -1,4 +1,5 @@
 import * as http from 'http';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { MessageInjector } from './injector';
@@ -504,7 +505,14 @@ async function showUrlPanel(
     'cursorRemoteQR',
     'Cursor Remote — Scan to Connect',
     vscode.ViewColumn.One,
-    { enableScripts: false }
+    {
+      enableScripts: false,
+      localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'brand'))],
+    }
+  );
+
+  const iconUri = panel.webview.asWebviewUri(
+    vscode.Uri.file(path.join(context.extensionPath, 'brand', 'icon-128.png'))
   );
 
   const qrSvg = await generateQrSvg(fullUrl);
@@ -525,10 +533,20 @@ async function showUrlPanel(
       margin: 0;
       padding: 24px;
     }
+    .brand-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 2px;
+    }
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+    }
     h1 {
       font-size: 22px;
       font-weight: 600;
-      margin-bottom: 2px;
+      margin: 0;
     }
     .version {
       color: #444;
@@ -588,7 +606,10 @@ async function showUrlPanel(
   </style>
 </head>
 <body>
-  <h1>Cursor Remote</h1>
+  <div class="brand-header">
+    <img src="${iconUri}" class="brand-icon" alt="Cursor Remote">
+    <h1>Cursor Remote</h1>
+  </div>
   <p class="subtitle">Scan the QR code with your phone to connect</p>
   <div class="qr-container">${qrSvg}</div>
   <p class="label">Public URL</p>

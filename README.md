@@ -4,7 +4,7 @@ Control your Cursor IDE from your phone. Browse conversations, send messages, an
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![VS Code 1.90+](https://img.shields.io/badge/vscode-%3E%3D1.90.0-blue.svg)
-![Version 1.0.28](https://img.shields.io/badge/version-1.0.28-green.svg)
+![Version 1.0.38](https://img.shields.io/badge/version-1.0.38-green.svg)
 
 ---
 
@@ -32,10 +32,10 @@ Control your Cursor IDE from your phone. Browse conversations, send messages, an
 
 ### Prebuilt Package
 
-A prebuilt `cursor-remote-1.0.28.vsix` is included in the repository. Install it directly:
+Download the latest `.vsix` from the [Releases](https://github.com/puntorigen/cursor-remote/releases) page, then install:
 
 ```bash
-cursor --install-extension cursor-remote-1.0.28.vsix
+cursor --install-extension cursor-remote-1.0.38.vsix
 ```
 
 After installing, press `Ctrl+P` (or `Cmd+P` on macOS), type `> Developer: Reload Window`, and hit Enter to activate the extension.
@@ -45,12 +45,12 @@ After installing, press `Ctrl+P` (or `Cmd+P` on macOS), type `> Developer: Reloa
 If you prefer to build from source:
 
 ```bash
-git clone https://github.com/your-username/cursor-remote.git
+git clone https://github.com/puntorigen/cursor-remote.git
 cd cursor-remote
 npm install
 npm run build
 npm run package
-cursor --install-extension cursor-remote-1.0.28.vsix
+cursor --install-extension cursor-remote-*.vsix
 ```
 
 ### Optional: cloudflared
@@ -161,6 +161,10 @@ cursor-remote/
 │   ├── index.html        # Mobile web app shell
 │   ├── app.js            # SPA logic
 │   └── styles.css        # Dark theme, mobile-first CSS
+├── brand/                 # Brand assets and guidelines
+│   ├── icon-128.png      # Extension icon
+│   ├── brand-guidelines.pdf
+│   └── ...               # Logo variants, wordmarks
 ├── dist/                  # Built extension output
 ├── package.json
 └── tsconfig.json

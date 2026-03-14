@@ -807,6 +807,15 @@ export class RemoteServer {
       }
     });
 
+    this.app.get('/favicon.ico', (_req, res) => {
+      const faviconPath = path.join(__dirname, '..', 'webview', 'favicon.png');
+      if (fs.existsSync(faviconPath)) {
+        res.type('image/png').send(fs.readFileSync(faviconPath));
+      } else {
+        res.status(204).end();
+      }
+    });
+
     this.app.get('/manifest.json', (_req, res) => {
       res.json({
         name: 'Cursor Remote',
@@ -815,7 +824,11 @@ export class RemoteServer {
         display: 'standalone',
         background_color: '#0f0f0f',
         theme_color: '#3b82f6',
-        icons: [],
+        icons: [
+          { src: '/static/icon-128.png', sizes: '128x128', type: 'image/png' },
+          { src: '/static/icon-256.png', sizes: '256x256', type: 'image/png' },
+          { src: '/static/icon-512.png', sizes: '512x512', type: 'image/png' },
+        ],
       });
     });
   }
