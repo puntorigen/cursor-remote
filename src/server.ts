@@ -393,6 +393,35 @@ export class RemoteServer {
       }
     });
 
+    this.app.get('/api/debug/projects', (_req, res) => {
+      try {
+        const projectsDir = path.join(os.homedir(), '.cursor', 'projects');
+        const exists = fs.existsSync(projectsDir);
+        const entries: string[] = exists
+          ? fs.readdirSync(projectsDir).slice(0, 20)
+          : [];
+        const details: Record<string, string[]> = {};
+        for (const e of entries) {
+          const full = path.join(projectsDir, e);
+          try {
+            if (fs.statSync(full).isDirectory()) {
+              details[e] = fs.readdirSync(full);
+            }
+          } catch {}
+        }
+        res.json({
+          platform: process.platform,
+          homedir: os.homedir(),
+          projectsDir,
+          exists,
+          entries,
+          details,
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     this.app.get('/api/projects/:slug/chats', (req, res) => {
       try {
         res.json(listChats(req.params.slug));
