@@ -2,7 +2,7 @@
   "name": "cursor-remote",
   "displayName": "Cursor Remote",
   "description": "Control your Cursor IDE sessions from your iPhone. Read conversations, send messages, and track file changes via a mobile-optimized web UI.",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "publisher": "local",
   "author": "Pablo Schaffner",
   "license": "MIT",
@@ -97,7 +97,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --sourcemap",
     "watch": "npm run build -- --watch",
-    "package": "vsce package --no-dependencies",
+    "package": "npm run build && vsce package --no-dependencies",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {

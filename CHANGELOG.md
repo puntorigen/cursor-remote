@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.22 — 2026-03-14
+
+### Fix: v1.0.19–v1.0.21 shipped with stale bundle
+- **Root cause**: `vsce package` was packaging the old `dist/extension.js` without rebuilding from source. All the v1.0.19–v1.0.21 source fixes (Windows workbench discovery, VSIX install, activation crash guard) were never actually included in the published VSIX.
+- Build pipeline now correctly rebuilds before packaging.
+- This release includes ALL accumulated fixes from v1.0.19–v1.0.21 in the actual shipped bundle.
+
 ## v1.0.21 — 2026-03-13
 
 ### Fix silent activation failure on Windows
