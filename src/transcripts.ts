@@ -320,25 +320,22 @@ export function listChats(projectSlug: string): ChatSummary[] {
 
   for (const { id, filePath } of entries) {
     const stat = fs.statSync(filePath);
-    const lines = fs
-      .readFileSync(filePath, 'utf-8')
-      .split('\n')
-      .filter((l) => l.trim());
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const messages = isJsonl(content)
+      ? parseJsonlTranscript(content)
+      : parsePlainTextTranscript(content);
 
     let firstMessage = '(empty)';
-    if (lines.length > 0) {
-      try {
-        const first = JSON.parse(lines[0]);
-        const text = extractText(first);
-        firstMessage = text.slice(0, 120);
-      } catch {}
+    const firstUser = messages.find((m) => m.role === 'user' && m.content.trim());
+    if (firstUser) {
+      firstMessage = firstUser.content.trim().slice(0, 120);
     }
 
     chatIds.push(id);
     chatMeta.push({
       id,
       firstMessage,
-      messageCount: lines.length,
+      messageCount: messages.length,
       lastModified: stat.mtimeMs,
     });
   }
@@ -355,30 +352,11 @@ export function listChats(projectSlug: string): ChatSummary[] {
 
 export function getChat(projectSlug: string, chatId: string): TranscriptMessage[] {
   const transcriptsDir = path.join(CURSOR_PROJECTS_DIR, projectSlug, 'agent-transcripts');
-  const jsonlFile = resolveTranscriptFile(transcriptsDir, chatId);
-  if (!jsonlFile) return [];
+  const filePath = resolveTranscriptFile(transcriptsDir, chatId);
+  if (!filePath) return [];
 
-  const lines = fs
-    .readFileSync(jsonlFile, 'utf-8')
-    .split('\n')
-    .filter((l) => l.trim());
-
-  const raw = lines.map((line, idx) => {
-    try {
-      const parsed = JSON.parse(line);
-      const text = extractText(parsed);
-      const toolCalls = extractToolCalls(text);
-      return {
-        role: (parsed.role || 'assistant') as 'user' | 'assistant',
-        content: text,
-        toolCalls,
-        timestamp: idx,
-      };
-    } catch {
-      return { role: 'assistant' as const, content: line, timestamp: idx };
-    }
-  });
-
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const raw = isJsonl(content) ? parseJsonlTranscript(content) : parsePlainTextTranscript(content);
   return deduplicateReplayedMessages(raw);
 }
 
@@ -421,6 +399,96 @@ export function getAiModifiedFiles(
     path: p,
     operations: Array.from(ops),
   }));
+}
+
+// ─── Transcript format detection & parsing ──────────────────────────────────
+
+/**
+ * Detects whether a transcript file is JSONL format (one JSON object per line)
+ * or plain text format (role markers like "user:" / "assistant:" on their own lines).
+ */
+function isJsonl(content: string): boolean {
+  const firstLine = content.split('\n').find((l) => l.trim());
+  if (!firstLine) return false;
+  try {
+    JSON.parse(firstLine);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Parses macOS/Linux-style JSONL transcripts (one JSON object per line). */
+function parseJsonlTranscript(content: string): TranscriptMessage[] {
+  const lines = content.split('\n').filter((l) => l.trim());
+  return lines.map((line, idx) => {
+    try {
+      const parsed = JSON.parse(line);
+      const text = extractText(parsed);
+      const toolCalls = extractToolCalls(text);
+      return {
+        role: (parsed.role || 'assistant') as 'user' | 'assistant',
+        content: text,
+        toolCalls,
+        timestamp: idx,
+      };
+    } catch {
+      return { role: 'assistant' as const, content: line, timestamp: idx };
+    }
+  });
+}
+
+/**
+ * Parses Windows-style plain text transcripts where role markers appear as
+ * separate lines ("user:" / "assistant:") and content follows until the
+ * next marker.
+ */
+function parsePlainTextTranscript(content: string): TranscriptMessage[] {
+  const lines = content.split('\n');
+  const messages: TranscriptMessage[] = [];
+  let currentRole: 'user' | 'assistant' = 'assistant';
+  let buffer: string[] = [];
+  let msgIndex = 0;
+
+  const flush = () => {
+    const text = buffer.join('\n').trim();
+    if (text) {
+      const toolCalls = extractToolCalls(text);
+      messages.push({
+        role: currentRole,
+        content: text,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        timestamp: msgIndex++,
+      });
+    }
+    buffer = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === 'user:') {
+      flush();
+      currentRole = 'user';
+    } else if (trimmed === 'assistant:') {
+      flush();
+      currentRole = 'assistant';
+    } else {
+      buffer.push(line);
+    }
+  }
+  flush();
+
+  // Filter out "[Thinking]" prefixed content from assistant messages —
+  // merge it into the next non-thinking assistant message or drop it.
+  const filtered: TranscriptMessage[] = [];
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.content.startsWith('[Thinking]')) {
+      continue;
+    }
+    filtered.push(msg);
+  }
+
+  return filtered;
 }
 
 /**

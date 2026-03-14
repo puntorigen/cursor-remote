@@ -4,7 +4,7 @@ Control your Cursor IDE from your phone. Browse conversations, send messages, an
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![VS Code 1.90+](https://img.shields.io/badge/vscode-%3E%3D1.90.0-blue.svg)
-![Version 1.0.24](https://img.shields.io/badge/version-1.0.24-green.svg)
+![Version 1.0.25](https://img.shields.io/badge/version-1.0.25-green.svg)
 
 ---
 
@@ -32,10 +32,10 @@ Control your Cursor IDE from your phone. Browse conversations, send messages, an
 
 ### Prebuilt Package
 
-A prebuilt `cursor-remote-1.0.24.vsix` is included in the repository. Install it directly:
+A prebuilt `cursor-remote-1.0.25.vsix` is included in the repository. Install it directly:
 
 ```bash
-cursor --install-extension cursor-remote-1.0.24.vsix
+cursor --install-extension cursor-remote-1.0.25.vsix
 ```
 
 After installing, press `Ctrl+P` (or `Cmd+P` on macOS), type `> Developer: Reload Window`, and hit Enter to activate the extension.
@@ -50,7 +50,7 @@ cd cursor-remote
 npm install
 npm run build
 npm run package
-cursor --install-extension cursor-remote-1.0.24.vsix
+cursor --install-extension cursor-remote-1.0.25.vsix
 ```
 
 ### Optional: cloudflared

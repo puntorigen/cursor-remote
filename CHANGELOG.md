@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.0.25 — 2026-03-14
+
+### Fix Windows transcript parsing (plain-text format)
+- On Windows, Cursor stores transcripts as plain text with `user:` / `assistant:` role markers on separate lines, not as JSON-per-line (`.jsonl`). This caused all messages to render as "assistant" with raw text including the role markers, and showed "CURSOR" labels everywhere.
+- Added format auto-detection: `isJsonl()` checks whether the file is JSON-per-line or plain text.
+- New `parsePlainTextTranscript()` correctly groups lines between role markers into proper user/assistant messages.
+- `[Thinking]` prefixed assistant messages are filtered out for cleaner display.
+- Chat titles and first-message extraction now work correctly for plain-text transcripts.
+
 ## v1.0.24 — 2026-03-14
 
 ### Fix Windows open-window detection
