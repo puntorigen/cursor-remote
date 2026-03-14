@@ -23,6 +23,29 @@ export async function activate(context: vscode.ExtensionContext) {
   const log = vscode.window.createOutputChannel('Cursor Remote');
   log.appendLine('[Extension] Activating Cursor Remote...');
 
+  // Create status bar FIRST so it's visible even if something below fails
+  statusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100
+  );
+  statusBarItem.command = 'cursorRemote.menu';
+  statusBarItem.text = '$(sync~spin) Cursor Remote';
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
+  try {
+    await doActivate(context, log);
+  } catch (err: any) {
+    log.appendLine(`[Extension] FATAL activation error: ${err.message}`);
+    log.appendLine(`[Extension] Stack: ${err.stack || '(none)'}`);
+    statusBarItem.text = '$(error) Cursor Remote (error)';
+    statusBarItem.tooltip = `Activation failed: ${err.message}`;
+    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+    log.show();
+  }
+}
+
+async function doActivate(context: vscode.ExtensionContext, log: vscode.OutputChannel) {
   authToken = crypto.randomBytes(16).toString('hex');
   log.appendLine(`[Extension] Auth token generated`);
 
@@ -31,7 +54,12 @@ export async function activate(context: vscode.ExtensionContext) {
   const autoStart = config.get<boolean>('autoStart', true);
   const autoTunnel = config.get<boolean>('autoTunnel', true);
 
-  const patchReady = await ensurePatch(context, log);
+  let patchReady = false;
+  try {
+    patchReady = await ensurePatch(context, log);
+  } catch (err: any) {
+    log.appendLine(`[Extension] ensurePatch threw: ${err.message}`);
+  }
   if (!patchReady) {
     log.appendLine('[Extension] Patch not active yet — injection will use clipboard fallback');
   }
@@ -51,13 +79,6 @@ export async function activate(context: vscode.ExtensionContext) {
       statusBarItem.text = '$(sync~spin) Cursor Remote (reconnecting...)';
     }
   });
-
-  statusBarItem = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Right,
-    100
-  );
-  statusBarItem.command = 'cursorRemote.menu';
-  context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.menu', () => showMenu(context, log))

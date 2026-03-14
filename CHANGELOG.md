@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.21 — 2026-03-13
+
+### Fix silent activation failure on Windows
+- The status bar item is now created FIRST, before any other initialization, so it's always visible even if something downstream crashes.
+- Wrapped the entire activation logic in a try-catch. If activation fails, the status bar shows an error indicator and the output log is opened automatically with the full stack trace.
+- `ensurePatch` is now wrapped in its own try-catch so a patcher crash doesn't prevent the rest of the extension from loading (server, tunnel, etc.).
+
 ## v1.0.20 — 2026-03-13
 
 ### Fix VSIX installation on Windows (EINVAL error)
