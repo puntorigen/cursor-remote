@@ -512,7 +512,9 @@ function parsePlainTextTranscript(content: string): TranscriptMessage[] {
 /**
  * Processes raw lines from a plain-text segment:
  *  - Strips [Thinking] blocks
- *  - Compacts [Tool call]/[Tool result] blocks into one-line summaries
+ *  - Compacts [Tool call]/[Tool result] blocks into one-line summaries,
+ *    consuming ALL parameter lines (including multi-line values like
+ *    contents, old_string, new_string, prompt, description, etc.)
  *  - Joins remaining content lines
  */
 function processSegmentLines(lines: string[]): string {
@@ -522,37 +524,47 @@ function processSegmentLines(lines: string[]): string {
   while (i < lines.length) {
     const trimmed = lines[i].trim();
 
-    // Skip [Thinking] content — consume until next bracket marker or end
     if (trimmed.startsWith('[Thinking]')) {
       i++;
       continue;
     }
 
-    // Compact [Tool call] blocks
+    // [Tool call] blocks — consume the call + ALL parameter lines
     const toolCallMatch = trimmed.match(/^\[Tool call\]\s+(\w+)/);
     if (toolCallMatch) {
       const toolName = toolCallMatch[1];
       i++;
       const params: Record<string, string> = {};
+      // Consume param lines: they start with a space followed by "key: value"
+      // Multi-line params (contents, old_string, new_string, prompt, etc.)
+      // continue on subsequent lines that are indented or not a new param/marker.
+      let currentKey: string | null = null;
       while (i < lines.length) {
-        const pLine = lines[i].trim();
-        if (!pLine || pLine.startsWith('[') || pLine === 'user:' || pLine === 'assistant:') break;
-        // Parameter lines look like " key: value"
-        const paramMatch = pLine.match(/^(\w+):\s*(.*)/);
-        if (paramMatch && lines[i].startsWith(' ')) {
-          params[paramMatch[1]] = paramMatch[2];
+        const raw = lines[i];
+        const pTrimmed = raw.trim();
+        // Stop at bracket markers or role markers
+        if (pTrimmed.startsWith('[') || pTrimmed === 'user:' || pTrimmed === 'assistant:') break;
+        // New param line: starts with space, then "key: value"
+        const paramMatch = raw.match(/^ (\w[\w_]*):\s?(.*)/);
+        if (paramMatch) {
+          currentKey = paramMatch[1];
+          params[currentKey] = paramMatch[2];
           i++;
-        } else {
-          break;
+          continue;
         }
+        // Continuation of multi-line param value (indented or content line)
+        if (currentKey !== null) {
+          i++;
+          continue;
+        }
+        // Not a param line and no current key — stop consuming
+        break;
       }
-      // Generate a compact tool call summary
       const summary = formatToolCallSummary(toolName, params);
       if (summary) output.push(summary);
       continue;
     }
 
-    // Skip [Tool result] lines — the result content follows as normal text
     if (trimmed.startsWith('[Tool result]')) {
       i++;
       continue;
@@ -565,27 +577,27 @@ function processSegmentLines(lines: string[]): string {
   return output.join('\n');
 }
 
+/** Known multi-line param keys — their content can span many lines. */
+const TOOL_DISPLAY: Record<string, (p: Record<string, string>) => string> = {
+  Shell:      (p) => p.command ? `\`\`\`bash\n${p.command}\n\`\`\`` : '',
+  Read:       (p) => p.path ? `📄 *Read* \`${p.path}\`` : '',
+  Write:      (p) => p.path ? `📝 *Write* \`${p.path}\`` : '',
+  Delete:     (p) => p.path ? `🗑️ *Delete* \`${p.path}\`` : '',
+  StrReplace: (p) => p.path ? `✏️ *Edit* \`${p.path}\`` : '',
+  EditNotebook: (p) => p.target_notebook ? `✏️ *Edit notebook* \`${p.target_notebook}\`` : '',
+  Grep:       (p) => p.pattern ? `🔍 *Search* \`${p.pattern}\`` : '',
+  Glob:       (p) => p.glob_pattern ? `🔍 *Find* \`${p.glob_pattern}\`` : '',
+  SemanticSearch: (p) => p.query ? `🔍 *Search* "${p.query}"` : '',
+  Task:       () => '',  // Task subagent details are internal noise
+  TodoWrite:  () => '',  // Todo management is internal
+  WebFetch:   (p) => p.url ? `🌐 *Fetch* \`${p.url}\`` : '',
+  WebSearch:  (p) => p.search_term ? `🌐 *Search web* "${p.search_term}"` : '',
+};
+
 function formatToolCallSummary(tool: string, params: Record<string, string>): string {
-  switch (tool) {
-    case 'Shell': {
-      const cmd = params.command || '';
-      return cmd ? `\`\`\`bash\n${cmd}\n\`\`\`` : '';
-    }
-    case 'Read':
-      return params.path ? `*Read* \`${params.path}\`` : '';
-    case 'Write':
-      return params.path ? `*Write* \`${params.path}\`` : '';
-    case 'Delete':
-      return params.path ? `*Delete* \`${params.path}\`` : '';
-    case 'StrReplace':
-      return params.path ? `*Edit* \`${params.path}\`` : '';
-    case 'Grep':
-      return params.pattern ? `*Search* \`${params.pattern}\`` : '';
-    case 'Glob':
-      return params.glob_pattern ? `*Find* \`${params.glob_pattern}\`` : '';
-    default:
-      return `*${tool}*` + (params.path ? ` \`${params.path}\`` : '');
-  }
+  const fn = TOOL_DISPLAY[tool];
+  if (fn) return fn(params);
+  return `🔧 *${tool}*` + (params.path ? ` \`${params.path}\`` : '');
 }
 
 /**

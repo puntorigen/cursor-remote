@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.27 — 2026-03-14
+
+### Robust Windows tool call parsing
+- Fixed multi-line parameter absorption: tool calls like `Write` (with `contents:`), `StrReplace` (with `old_string:`/`new_string:`), and `Task` (with `prompt:`) now fully consume all their parameter lines instead of leaking file contents into the chat display.
+- `Task` and `TodoWrite` tool calls are silently absorbed (internal agent noise).
+- Richer tool call summaries with icons: `📄 Read`, `📝 Write`, `🗑️ Delete`, `✏️ Edit`, `🔍 Search`, `🌐 Fetch`, etc.
+- Shell commands rendered as proper bash code blocks.
+
 ## v1.0.26 — 2026-03-14
 
 ### Improve Windows transcript rendering
