@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.28 — 2026-03-14
+
+### Syntax-highlighted code blocks and table styling
+- Fixed `marked` v12 integration: syntax highlighting via `highlight.js` was silently broken because `marked.setOptions({ highlight })` was removed in v12. Switched to `marked.use({ renderer: { code() } })`.
+- Code blocks now render with proper syntax highlighting (github-dark theme), language badge label, and polished dark styling.
+- Added markdown table styling with alternating row backgrounds and proper borders.
+- Inline code gets a subtle dark background with border.
+
 ## v1.0.27 — 2026-03-14
 
 ### Robust Windows tool call parsing

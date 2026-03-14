@@ -46,15 +46,26 @@ const state = {
 };
 
 // ── Markdown setup ──
-marked.setOptions({
-  highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(code, { language: lang }).value;
-    }
-    return hljs.highlightAuto(code).value;
-  },
+marked.use({
   breaks: true,
   gfm: true,
+  renderer: {
+    code({ text, lang }) {
+      const raw = text || '';
+      let highlighted;
+      try {
+        if (lang && hljs.getLanguage(lang)) {
+          highlighted = hljs.highlight(raw, { language: lang }).value;
+        } else {
+          highlighted = hljs.highlightAuto(raw).value;
+        }
+      } catch {
+        highlighted = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+      const langLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
+      return `<pre><code class="hljs">${langLabel}${highlighted}</code></pre>`;
+    },
+  },
 });
 
 // ── Navigation ──

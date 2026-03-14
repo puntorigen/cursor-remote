@@ -316,30 +316,75 @@ main {
 .msg p:last-child { margin-bottom: 0; }
 
 .msg pre {
-  background: #111;
-  border-radius: 8px;
-  padding: 10px;
+  background: #0d1117;
+  border-radius: 10px;
+  padding: 14px;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
   margin: 8px 0;
-  border: 1px solid var(--border);
+  border: 1px solid #30363d;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.msg pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+
+.msg pre .code-lang {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10px;
+  color: #484f58;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
 }
 
 .msg code {
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
   font-size: 13px;
 }
 
 .msg :not(pre) > code {
-  background: #222;
-  padding: 2px 5px;
-  border-radius: 4px;
+  background: #1c2128;
+  padding: 2px 6px;
+  border-radius: 5px;
   font-size: 12px;
+  border: 1px solid #30363d;
+  color: #e6edf3;
 }
 
 .msg ul, .msg ol {
   padding-left: 20px;
   margin: 6px 0;
+}
+
+.msg table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.msg th, .msg td {
+  border: 1px solid #30363d;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.msg th {
+  background: #161b22;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.msg tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .msg a {
