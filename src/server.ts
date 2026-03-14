@@ -350,7 +350,10 @@ export class RemoteServer {
     });
 
     this.app.get('/api/_tunnel-url', (_req, res) => {
-      res.json({ tunnelUrl: this.tunnelUrl });
+      res.json({
+        tunnelUrl: this.tunnelUrl,
+        fullUrl: this.tunnelUrl ? `${this.tunnelUrl}/?token=${this.authToken}` : null,
+      });
     });
 
     this.app.post('/api/_reload', (_req, res) => {

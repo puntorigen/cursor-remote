@@ -127,9 +127,9 @@ async function doActivate(context: vscode.ExtensionContext, log: vscode.OutputCh
 
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorRemote.showUrl', async () => {
-      const tunnelUrl = await getTunnelUrl();
+      const { tunnelUrl, fullUrl: tunnelFullUrl } = await getTunnelInfo();
       const localUrl = `http://localhost:${actualPort || configPort}/?token=${authToken}`;
-      const fullUrl = tunnelUrl ? `${tunnelUrl}/?token=${authToken}` : localUrl;
+      const fullUrl = tunnelFullUrl || localUrl;
 
       if (tunnelUrl) {
         showUrlPanel(context, fullUrl, localUrl);
@@ -278,8 +278,8 @@ async function startServer(configPort: number, log: vscode.OutputChannel): Promi
     }
 
     // Show tunnel status — secondaries fetch it from the primary
-    const startupTunnelUrl = await getTunnelUrl();
-    updateStatusBar(startupTunnelUrl);
+    const startupTunnel = await getTunnelInfo();
+    updateStatusBar(startupTunnel.tunnelUrl);
     log.appendLine(`[Extension] Server started on port ${actualPort}`);
     return true;
   } catch (err: any) {
@@ -372,12 +372,14 @@ function updateStatusBar(tunnelUrl: string | null) {
   statusBarItem.show();
 }
 
-async function getTunnelUrl(): Promise<string | null> {
-  const local = tunnel?.getUrl() || null;
-  if (local) return local;
-  if (isPrimary) return null;
+interface TunnelInfo { tunnelUrl: string | null; fullUrl: string | null; }
 
-  // Secondary: ask the primary via the auth-free internal endpoint
+async function getTunnelInfo(): Promise<TunnelInfo> {
+  const local = tunnel?.getUrl() || null;
+  if (local) return { tunnelUrl: local, fullUrl: `${local}/?token=${authToken}` };
+  if (isPrimary) return { tunnelUrl: null, fullUrl: null };
+
+  // Secondary: fetch both the bare URL and the primary's authenticated URL
   return new Promise((resolve) => {
     const req = http.get(
       `http://127.0.0.1:${PRIMARY_PORT}/api/_tunnel-url`,
@@ -388,13 +390,16 @@ async function getTunnelUrl(): Promise<string | null> {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            resolve(parsed.tunnelUrl || null);
-          } catch { resolve(null); }
+            resolve({
+              tunnelUrl: parsed.tunnelUrl || null,
+              fullUrl: parsed.fullUrl || null,
+            });
+          } catch { resolve({ tunnelUrl: null, fullUrl: null }); }
         });
       },
     );
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve({ tunnelUrl: null, fullUrl: null }));
+    req.on('timeout', () => { req.destroy(); resolve({ tunnelUrl: null, fullUrl: null }); });
   });
 }
 
@@ -402,10 +407,10 @@ async function showMenu(
   context: vscode.ExtensionContext,
   log: vscode.OutputChannel,
 ) {
-  const tunnelUrl = await getTunnelUrl();
+  const { tunnelUrl, fullUrl: tunnelFullUrl } = await getTunnelInfo();
   const portLabel = actualPort || PRIMARY_PORT;
   const localUrl = `http://localhost:${portLabel}/?token=${authToken}`;
-  const fullUrl = tunnelUrl ? `${tunnelUrl}/?token=${authToken}` : localUrl;
+  const fullUrl = tunnelFullUrl || localUrl;
 
   interface MenuItem extends vscode.QuickPickItem {
     action: string;

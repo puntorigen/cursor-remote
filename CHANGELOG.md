@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.34 — 2026-03-14
+
+### Fix: Secondary windows produced invalid tunnel URLs
+- The QR code and "Copy Public URL" from secondary windows appended the **secondary's own auth token** to the primary's tunnel URL, producing a URL that would fail authentication.
+- The `/api/_tunnel-url` internal endpoint now also returns `fullUrl` (tunnel URL + primary's token).
+- Secondary windows use the primary's pre-built authenticated URL directly.
+- The token is only exposed over the localhost-only `_` endpoint (never via the tunnel).
+
 ## v1.0.33 — 2026-03-14
 
 ### Fix: Secondary windows tunnel URL fetch was blocked by auth
