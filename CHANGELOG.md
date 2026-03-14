@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.26 — 2026-03-14
+
+### Improve Windows transcript rendering
+- Consecutive `assistant:` blocks (interleaved with tool calls) are now merged into a single message instead of showing dozens of separate "CURSOR" bubbles.
+- `[Tool call]` and `[Tool result]` blocks with their parameter lines are compacted into readable one-line summaries (e.g. shell commands in code blocks, file operations as `*Read* \`path\``).
+- `[Thinking]` blocks are stripped from display.
+- Markdown tables and other multi-line content now renders correctly as a single coherent message.
+
 ## v1.0.25 — 2026-03-14
 
 ### Fix Windows transcript parsing (plain-text format)

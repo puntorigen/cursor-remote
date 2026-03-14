@@ -442,53 +442,150 @@ function parseJsonlTranscript(content: string): TranscriptMessage[] {
  * Parses Windows-style plain text transcripts where role markers appear as
  * separate lines ("user:" / "assistant:") and content follows until the
  * next marker.
+ *
+ * Key behaviours:
+ *   - Consecutive assistant: blocks (interleaved with tool calls) are merged
+ *     into a single assistant message so the UI doesn't show dozens of tiny
+ *     "CURSOR" bubbles.
+ *   - [Tool call] / [Tool result] sections and their indented parameter lines
+ *     are compacted into a short summary line inside the message.
+ *   - [Thinking] blocks are stripped entirely.
  */
 function parsePlainTextTranscript(content: string): TranscriptMessage[] {
   const lines = content.split('\n');
-  const messages: TranscriptMessage[] = [];
-  let currentRole: 'user' | 'assistant' = 'assistant';
-  let buffer: string[] = [];
-  let msgIndex = 0;
 
-  const flush = () => {
-    const text = buffer.join('\n').trim();
-    if (text) {
-      const toolCalls = extractToolCalls(text);
-      messages.push({
-        role: currentRole,
-        content: text,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        timestamp: msgIndex++,
-      });
-    }
-    buffer = [];
-  };
+  // Phase 1: split into raw segments by role marker
+  interface Segment { role: 'user' | 'assistant'; lines: string[] }
+  const segments: Segment[] = [];
+  let curRole: 'user' | 'assistant' = 'assistant';
+  let curLines: string[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed === 'user:') {
-      flush();
-      currentRole = 'user';
+      if (curLines.length) segments.push({ role: curRole, lines: curLines });
+      curRole = 'user';
+      curLines = [];
     } else if (trimmed === 'assistant:') {
-      flush();
-      currentRole = 'assistant';
+      if (curLines.length) segments.push({ role: curRole, lines: curLines });
+      curRole = 'assistant';
+      curLines = [];
     } else {
-      buffer.push(line);
+      curLines.push(line);
     }
   }
-  flush();
+  if (curLines.length) segments.push({ role: curRole, lines: curLines });
 
-  // Filter out "[Thinking]" prefixed content from assistant messages —
-  // merge it into the next non-thinking assistant message or drop it.
-  const filtered: TranscriptMessage[] = [];
-  for (const msg of messages) {
-    if (msg.role === 'assistant' && msg.content.startsWith('[Thinking]')) {
+  // Phase 2: merge consecutive assistant segments
+  interface MergedSegment { role: 'user' | 'assistant'; lines: string[] }
+  const merged: MergedSegment[] = [];
+  for (const seg of segments) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === 'assistant' && seg.role === 'assistant') {
+      last.lines.push(...seg.lines);
+    } else {
+      merged.push({ role: seg.role, lines: [...seg.lines] });
+    }
+  }
+
+  // Phase 3: process each merged segment into a message
+  const messages: TranscriptMessage[] = [];
+  let msgIndex = 0;
+
+  for (const seg of merged) {
+    const processed = processSegmentLines(seg.lines);
+    const text = processed.trim();
+    if (!text) continue;
+
+    const toolCalls = extractToolCalls(text);
+    messages.push({
+      role: seg.role,
+      content: text,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      timestamp: msgIndex++,
+    });
+  }
+
+  return messages;
+}
+
+/**
+ * Processes raw lines from a plain-text segment:
+ *  - Strips [Thinking] blocks
+ *  - Compacts [Tool call]/[Tool result] blocks into one-line summaries
+ *  - Joins remaining content lines
+ */
+function processSegmentLines(lines: string[]): string {
+  const output: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+
+    // Skip [Thinking] content — consume until next bracket marker or end
+    if (trimmed.startsWith('[Thinking]')) {
+      i++;
       continue;
     }
-    filtered.push(msg);
+
+    // Compact [Tool call] blocks
+    const toolCallMatch = trimmed.match(/^\[Tool call\]\s+(\w+)/);
+    if (toolCallMatch) {
+      const toolName = toolCallMatch[1];
+      i++;
+      const params: Record<string, string> = {};
+      while (i < lines.length) {
+        const pLine = lines[i].trim();
+        if (!pLine || pLine.startsWith('[') || pLine === 'user:' || pLine === 'assistant:') break;
+        // Parameter lines look like " key: value"
+        const paramMatch = pLine.match(/^(\w+):\s*(.*)/);
+        if (paramMatch && lines[i].startsWith(' ')) {
+          params[paramMatch[1]] = paramMatch[2];
+          i++;
+        } else {
+          break;
+        }
+      }
+      // Generate a compact tool call summary
+      const summary = formatToolCallSummary(toolName, params);
+      if (summary) output.push(summary);
+      continue;
+    }
+
+    // Skip [Tool result] lines — the result content follows as normal text
+    if (trimmed.startsWith('[Tool result]')) {
+      i++;
+      continue;
+    }
+
+    output.push(lines[i]);
+    i++;
   }
 
-  return filtered;
+  return output.join('\n');
+}
+
+function formatToolCallSummary(tool: string, params: Record<string, string>): string {
+  switch (tool) {
+    case 'Shell': {
+      const cmd = params.command || '';
+      return cmd ? `\`\`\`bash\n${cmd}\n\`\`\`` : '';
+    }
+    case 'Read':
+      return params.path ? `*Read* \`${params.path}\`` : '';
+    case 'Write':
+      return params.path ? `*Write* \`${params.path}\`` : '';
+    case 'Delete':
+      return params.path ? `*Delete* \`${params.path}\`` : '';
+    case 'StrReplace':
+      return params.path ? `*Edit* \`${params.path}\`` : '';
+    case 'Grep':
+      return params.pattern ? `*Search* \`${params.pattern}\`` : '';
+    case 'Glob':
+      return params.glob_pattern ? `*Find* \`${params.glob_pattern}\`` : '';
+    default:
+      return `*${tool}*` + (params.path ? ` \`${params.path}\`` : '');
+  }
 }
 
 /**
