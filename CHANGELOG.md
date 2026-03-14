@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.32 — 2026-03-14
+
+### Tunnel URL and QR code available on secondary windows
+- **Fixed**: Secondary Cursor windows now show "Show QR Code" and "Copy Public URL" in the status bar menu by fetching the tunnel URL from the primary window.
+- The `showUrl` command also works from secondary windows.
+- Secondary windows show the globe icon in the status bar when the primary has an active tunnel.
+
 ## v1.0.31 — 2026-03-14
 
 ### Mode and model selection from the web UI
