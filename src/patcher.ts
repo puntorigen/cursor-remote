@@ -14,6 +14,12 @@
  *   cursorRemote._getState()
  *     — Returns { selectedComposerId, composerIds } for the current window.
  *
+ *   cursorRemote._prompt({ prompt, placeholder? })
+ *     — One-shot LLM query using the default model via aiService.getSimplePrompt.
+ *
+ *   cursorRemote._query({ prompt, model? })
+ *     — Model-selectable LLM query via aiClient().getPassthroughPrompt.
+ *
  * Dynamic discovery:
  *   Minified variable names (DI tokens, CommandsRegistry) are discovered at
  *   patch time by matching stable string literals that survive minification.
@@ -334,6 +340,7 @@ interface DiscoveredVars {
   composerViewsService: string;
   composerModesService: string;
   modelConfigService: string;
+  aiService: string;
 }
 
 /**
@@ -351,6 +358,7 @@ function discoverVariables(content: string): { vars?: DiscoveredVars; errors: st
     composerViewsService: 'composerViewsService',
     composerModesService: 'composerModesService',
     modelConfigService:   'modelConfigService',
+    aiService:            'aiService',
   };
 
   let createDecoratorName: string | undefined;
@@ -413,6 +421,7 @@ function discoverVariables(content: string): { vars?: DiscoveredVars; errors: st
       composerViewsService: tokens.composerViewsService,
       composerModesService: tokens.composerModesService,
       modelConfigService: tokens.modelConfigService,
+      aiService: tokens.aiService,
     },
     errors: [],
   };
@@ -471,6 +480,7 @@ function buildPatchCode(v: DiscoveredVars): string {
   const VS = v.composerViewsService;
   const MS = v.composerModesService;
   const MC = v.modelConfigService;
+  const AI = v.aiService;
 
   const waitBlock = (dsVar: string, vsVar: string, idVar: string, hVar: string) => [
     `await ${vsVar}.showAndFocus(${idVar});`,
@@ -560,6 +570,35 @@ function buildPatchCode(v: DiscoveredVars): string {
         `if(sel){try{currentMode=ms.getComposerUnifiedMode(sel)||"agent"}catch(me){}}`,
         `if(sel){try{var cfg=mc.getModelConfig("composer");currentModel=cfg.modelName||"default"}catch(me){}}`,
         `return{ok:true,modes:modes,models:models,currentMode:currentMode,currentModel:currentModel};`,
+      `}catch(x){`,
+        `return{ok:false,error:String(x)};`,
+      `}`,
+    `})`,
+
+    `,`,
+
+    // _prompt: simple one-shot query using the default model
+    `${CR}.registerCommand("cursorRemote._prompt",async(n,e)=>{`,
+      `try{`,
+        `if(!e||!e.prompt)return{ok:false,error:"prompt is required"};`,
+        `var ai=n.get(${AI});`,
+        `var r=await ai.getSimplePrompt(e.prompt,e.placeholder||"");`,
+        `return{ok:true,result:r.result||""};`,
+      `}catch(x){`,
+        `return{ok:false,error:String(x)};`,
+      `}`,
+    `})`,
+
+    `,`,
+
+    // _query: model-selectable query via getPassthroughPrompt
+    `${CR}.registerCommand("cursorRemote._query",async(n,e)=>{`,
+      `try{`,
+        `if(!e||!e.prompt)return{ok:false,error:"prompt is required"};`,
+        `var ai=n.get(${AI});`,
+        `var client=ai.aiClient();`,
+        `var r=await client.getPassthroughPrompt({query:e.prompt,modelName:e.model||""});`,
+        `return{ok:true,result:r.result||r.response||""};`,
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
@@ -1021,7 +1060,8 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
     + `EventService=${vars.composerEventService}, `
     + `ViewsService=${vars.composerViewsService}, `
     + `ModesService=${vars.composerModesService}, `
-    + `ModelConfigService=${vars.modelConfigService}`,
+    + `ModelConfigService=${vars.modelConfigService}, `
+    + `AiService=${vars.aiService}`,
   );
 
   log.appendLine('[Patcher] Locating injection point...');

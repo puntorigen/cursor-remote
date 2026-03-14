@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.36 — 2026-03-14
+
+### Programmatic LLM access via Cursor internals
+- **New**: `POST /api/prompt` — one-shot LLM query using the default model via `aiService.getSimplePrompt`. Accepts `{prompt, placeholder?}`, returns `{ok, result}`.
+- **New**: `POST /api/query` — model-selectable LLM query via `aiClient().getPassthroughPrompt`. Accepts `{prompt, model?}`, returns `{ok, result}`. Model names match those from `/api/modes-and-models`.
+- Patcher now discovers and injects `aiService` alongside the existing composer services.
+- Two new patched commands: `cursorRemote._prompt` and `cursorRemote._query`.
+- Both endpoints support multi-window proxying via the `slug` parameter.
+- Auth is handled automatically through Cursor's existing session — no API keys needed.
+
 ## v1.0.35 — 2026-03-14
 
 ### Show version in web UI and QR panel

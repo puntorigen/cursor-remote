@@ -251,6 +251,36 @@ export class MessageInjector {
     }
   }
 
+  async prompt(text: string, placeholder?: string): Promise<{ ok: boolean; result?: string; error?: string }> {
+    if (!this.patchAvailable) {
+      return { ok: false, error: 'Patch not applied' };
+    }
+    try {
+      const r = await vscode.commands.executeCommand<{ ok: boolean; result?: string; error?: string }>(
+        'cursorRemote._prompt',
+        { prompt: text, placeholder: placeholder || '' },
+      );
+      return r ?? { ok: false, error: 'No response from _prompt' };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async query(text: string, model?: string): Promise<{ ok: boolean; result?: string; error?: string }> {
+    if (!this.patchAvailable) {
+      return { ok: false, error: 'Patch not applied' };
+    }
+    try {
+      const r = await vscode.commands.executeCommand<{ ok: boolean; result?: string; error?: string }>(
+        'cursorRemote._query',
+        { prompt: text, model: model || '' },
+      );
+      return r ?? { ok: false, error: 'No response from _query' };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
   private async strategyPatchedSubmit(
     message: string,
     composerId: string,

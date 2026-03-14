@@ -531,10 +531,10 @@ async function showUrlPanel(
       margin-bottom: 2px;
     }
     .version {
-      color: #666;
-      font-size: 12px;
+      color: #444;
+      font-size: 11px;
       font-family: 'SF Mono', 'Fira Code', monospace;
-      margin-bottom: 6px;
+      margin-top: 24px;
     }
     .subtitle {
       color: #888;
@@ -589,7 +589,6 @@ async function showUrlPanel(
 </head>
 <body>
   <h1>Cursor Remote</h1>
-  <p class="version">v${EXT_VERSION}</p>
   <p class="subtitle">Scan the QR code with your phone to connect</p>
   <div class="qr-container">${qrSvg}</div>
   <p class="label">Public URL</p>
@@ -597,6 +596,7 @@ async function showUrlPanel(
   <p class="label">Local URL</p>
   <p class="local-url">${escapeHtml(localUrl)}</p>
   <p class="hint">The tunnel URL changes each restart. QR code is the fastest way to connect.</p>
+  <p class="version">v${EXT_VERSION}</p>
 </body>
 </html>`;
 
