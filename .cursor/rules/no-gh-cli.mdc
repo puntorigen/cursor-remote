@@ -1,0 +1,47 @@
+---
+description: Never use the gh CLI - use git and the GitHub REST API for all repository operations
+alwaysApply: true
+---
+
+# No GitHub CLI (gh)
+
+Never use `gh` for any operation. Use `git` for version control and the GitHub REST API (via Python/curl) for releases.
+
+## Git operations
+
+- **Push/pull**: `git push`, `git pull`, `git fetch`
+- **Tags**: `git tag v1.x.x && git push origin --tags`
+- **Issues/PRs**: Do not interact with GitHub issues or PRs via CLI.
+
+## Creating GitHub Releases
+
+Use a Python script with `urllib.request` against the GitHub REST API. The auth token is embedded in the git remote URL (`https://<TOKEN>@github.com/...`).
+
+```python
+import subprocess, json, re, os, urllib.request, urllib.error
+
+# 1. Extract token from git remote
+remote = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], text=True).strip()
+m = re.search(r'https://([^@]+)@github\.com/(.+?)\.git', remote)
+token, repo = m.group(1), m.group(2)
+
+# 2. Create release
+body = {"tag_name": "vX.Y.Z", "name": "vX.Y.Z: Title", "body": "Release notes..."}
+req = urllib.request.Request(
+    f"https://api.github.com/repos/{repo}/releases",
+    data=json.dumps(body).encode(), method='POST',
+    headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json',
+             'Content-Type': 'application/json'})
+result = json.loads(urllib.request.urlopen(req).read())
+upload_url = result['upload_url'].split('{')[0]
+
+# 3. Upload VSIX asset
+with open("cursor-remote-X.Y.Z.vsix", 'rb') as f:
+    urllib.request.urlopen(urllib.request.Request(
+        f"{upload_url}?name=cursor-remote-X.Y.Z.vsix",
+        data=f.read(), method='POST',
+        headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json',
+                 'Content-Type': 'application/octet-stream'}))
+```
+
+Handle `already_exists` errors by fetching the existing release via `GET /repos/{repo}/releases/tags/{tag}` and uploading assets to it.

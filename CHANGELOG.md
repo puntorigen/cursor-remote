@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.0.39 — 2026-03-10
+
+### Premium web UI overhaul
+- **Glassmorphism**: Header and footer use frosted glass backgrounds with `backdrop-filter: blur(20px)`, replacing flat solid colors.
+- **Card elevation**: Project and chat list items now have layered glass surfaces with subtle shadows, scale-on-press feedback, and light-edge borders.
+- **Directional navigation**: View transitions slide left/right based on navigation direction (forward = slide right, back = slide left), communicating spatial hierarchy.
+- **Breadcrumb trail**: The header subtitle now shows tappable breadcrumbs (e.g. `Projects / my-project / Chat title`) for direct navigation to any depth.
+- **Swipe-back gesture**: Swiping from the left edge of the screen navigates back, matching iOS native behavior.
+- **Logo home shortcut**: Long-pressing the header logo jumps directly to the Projects root.
+- **Staggered list entrance**: Project and chat items cascade in with a 40ms waterfall delay.
+- **Message entrance**: Chat messages slide in with a subtle scale animation.
+- **Branded spinner**: Loading indicator now uses brand blue + cyan dual-color.
+- **Scroll FAB**: The scroll-to-bottom button uses glassmorphism with a subtle blue glow.
+- **Toast animations**: Slide-in entrance and fade-out exit with glass backdrop.
+- **Tab indicator**: Animated underline replaces the hard border-bottom on Chats/Files tabs.
+- **Status pulse**: The green online dot has a breathing pulse animation.
+- **Pending shimmer**: Remote-sent messages show a gradient shimmer while awaiting confirmation.
+- **Input focus glow**: The message input gets a blue ring glow on focus.
+- **Send button shadow**: Accent-colored shadow with spring press effect.
+- **Typography**: Tighter view headers (-0.5px tracking), bolder role labels, refined section labels, increased message spacing.
+- **Code block polish**: Gradient top edge suggesting a title bar, plus subtle drop shadow.
+- **Active project glow**: Projects with a live Cursor window show a cyan border glow echoing the holographic cube brand.
+- All surfaces (file items, sub-tabs, workspace banner) upgraded to glass treatment.
+
 ## v1.0.38 — 2026-03-14
 
 ### Brand identity & visual assets

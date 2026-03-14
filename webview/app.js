@@ -92,69 +92,267 @@ marked.use({
 });
 
 // ── Navigation ──
+const VIEW_DEPTH = { projects: 0, chats: 1, chat: 2, diff: 2 };
+let _navTransitioning = false;
+
 function navigate(view, opts = {}) {
-  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-  const el = document.getElementById(`${view}View`);
-  if (el) el.classList.add('active');
+  if (_navTransitioning) return;
 
-  const main = document.getElementById('mainContent');
-  main.style.overflow = view === 'chat' ? 'hidden' : '';
+  const oldView = state.currentView;
+  const oldDepth = VIEW_DEPTH[oldView] ?? 0;
+  const newDepth = VIEW_DEPTH[view] ?? 0;
+  const direction = opts._direction || (newDepth > oldDepth ? 'forward' : newDepth < oldDepth ? 'back' : 'forward');
+  const isInitial = oldView === view && !document.querySelector('.view.active');
 
-  state.currentView = view;
+  if (opts.name) state._navProjectName = opts.name;
+  if (opts.preview) state._navChatTitle = opts.preview;
 
-  const backBtn = document.getElementById('backBtn');
-  const inputBar = document.getElementById('inputBar');
-  const headerTitle = document.querySelector('#headerTitle h1');
+  const oldEl = document.getElementById(`${oldView}View`);
+  const newEl = document.getElementById(`${view}View`);
+
+  function doSwitch() {
+    document.querySelectorAll('.view').forEach((v) => {
+      v.classList.remove('active', 'exit-forward', 'exit-back', 'enter-forward', 'enter-back');
+    });
+    if (newEl) {
+      newEl.classList.add('active');
+      if (!isInitial && oldView !== view) {
+        newEl.classList.add(direction === 'forward' ? 'enter-forward' : 'enter-back');
+        newEl.addEventListener('animationend', () => {
+          newEl.classList.remove('enter-forward', 'enter-back');
+        }, { once: true });
+      }
+    }
+
+    const main = document.getElementById('mainContent');
+    main.style.overflow = view === 'chat' ? 'hidden' : '';
+    state.currentView = view;
+
+    const backBtn = document.getElementById('backBtn');
+    const inputBar = document.getElementById('inputBar');
+    const headerTitle = document.querySelector('#headerTitle h1');
+
+    backBtn.classList.toggle('hidden', view === 'projects');
+    inputBar.classList.toggle('hidden', view !== 'chat');
+    document.getElementById('scrollToBottomBtn').classList.remove('visible');
+
+    switch (view) {
+      case 'projects':
+        headerTitle.textContent = 'Cursor Remote';
+        buildBreadcrumb('projects');
+        stopPolling();
+        loadProjects();
+        break;
+      case 'chats': {
+        headerTitle.textContent = opts.name || state._navProjectName || 'Project';
+        state.currentProject = opts.slug || state.currentProject;
+        state.modesAndModelsLoaded = false;
+        const proj = state.projectsData.find((p) => p.slug === state.currentProject);
+        state.currentProjectClosed = proj ? !proj.hasOpenWindow : false;
+        buildBreadcrumb('chats', { projectName: headerTitle.textContent });
+        stopPolling();
+        loadChats(state.currentProject);
+        loadGitFiles(state.currentProject);
+        break;
+      }
+      case 'chat':
+        headerTitle.textContent = opts.preview || state._navChatTitle || 'Chat';
+        state.currentChat = opts.id || state.currentChat;
+        buildBreadcrumb('chat', {
+          projectName: state._navProjectName,
+          chatTitle: headerTitle.textContent,
+        });
+        loadChat(state.currentProject, state.currentChat);
+        fetchModesAndModels();
+        break;
+      case 'diff':
+        headerTitle.textContent = opts.file || 'Diff';
+        buildBreadcrumb('diff', {
+          projectName: state._navProjectName,
+          fileName: opts.file,
+        });
+        loadDiff(state.currentProject, opts.file, opts.staged);
+        break;
+    }
+    _navTransitioning = false;
+  }
+
+  if (!isInitial && oldView !== view && oldEl) {
+    _navTransitioning = true;
+    const exitClass = direction === 'forward' ? 'exit-forward' : 'exit-back';
+    oldEl.classList.add(exitClass);
+    setTimeout(() => {
+      oldEl.classList.remove('active', exitClass);
+      doSwitch();
+    }, 150);
+  } else {
+    doSwitch();
+  }
+}
+
+function buildBreadcrumb(view, opts = {}) {
   const headerSub = document.getElementById('headerSub');
-
-  backBtn.classList.toggle('hidden', view === 'projects');
-  inputBar.classList.toggle('hidden', view !== 'chat');
-  document.getElementById('scrollToBottomBtn').classList.remove('visible');
+  if (!headerSub) return;
 
   switch (view) {
     case 'projects':
-      headerTitle.textContent = 'Cursor Remote';
-      headerSub.textContent = state.serverVersion ? `v${state.serverVersion}` : '';
-      stopPolling();
-      loadProjects();
+      headerSub.innerHTML = state.serverVersion ? `v${state.serverVersion}` : '';
       break;
-    case 'chats': {
-      headerTitle.textContent = opts.name || 'Project';
-      headerSub.textContent = opts.path || '';
-      state.currentProject = opts.slug;
-      state.modesAndModelsLoaded = false;
-      const proj = state.projectsData.find((p) => p.slug === opts.slug);
-      state.currentProjectClosed = proj ? !proj.hasOpenWindow : false;
-      stopPolling();
-      loadChats(opts.slug);
-      loadGitFiles(opts.slug);
+    case 'chats':
+      headerSub.innerHTML =
+        `<span class="breadcrumb-segment" data-nav="projects">Projects</span>` +
+        `<span class="breadcrumb-sep">/</span>` +
+        `<span class="breadcrumb-current">${escHtml(opts.projectName || '')}</span>`;
       break;
-    }
     case 'chat':
-      headerTitle.textContent = opts.preview || 'Chat';
-      headerSub.textContent = '';
-      state.currentChat = opts.id;
-      loadChat(state.currentProject, opts.id);
-      fetchModesAndModels();
+      headerSub.innerHTML =
+        `<span class="breadcrumb-segment" data-nav="projects">Projects</span>` +
+        `<span class="breadcrumb-sep">/</span>` +
+        `<span class="breadcrumb-segment" data-nav="chats">${escHtml(opts.projectName || '')}</span>` +
+        `<span class="breadcrumb-sep">/</span>` +
+        `<span class="breadcrumb-current">${escHtml(truncate(opts.chatTitle || '', 20))}</span>`;
       break;
     case 'diff':
-      headerTitle.textContent = opts.file || 'Diff';
-      headerSub.textContent = '';
-      loadDiff(state.currentProject, opts.file, opts.staged);
+      headerSub.innerHTML =
+        `<span class="breadcrumb-segment" data-nav="projects">Projects</span>` +
+        `<span class="breadcrumb-sep">/</span>` +
+        `<span class="breadcrumb-segment" data-nav="chats">${escHtml(opts.projectName || '')}</span>` +
+        `<span class="breadcrumb-sep">/</span>` +
+        `<span class="breadcrumb-current">${escHtml(opts.fileName || 'Diff')}</span>`;
       break;
   }
 }
 
-document.getElementById('backBtn').addEventListener('click', () => {
+function truncate(str, len) {
+  return str.length > len ? str.slice(0, len) + '...' : str;
+}
+
+document.getElementById('headerSub').addEventListener('click', (e) => {
+  const segment = e.target.closest('.breadcrumb-segment');
+  if (!segment) return;
+  const target = segment.dataset.nav;
+  if (target === 'projects') {
+    navigate('projects', { _direction: 'back' });
+  } else if (target === 'chats') {
+    navigate('chats', {
+      slug: state.currentProject,
+      name: state._navProjectName,
+      _direction: 'back',
+    });
+  }
+});
+
+function goBack() {
   if (state.currentView === 'chat' || state.currentView === 'diff') {
     navigate('chats', {
       slug: state.currentProject,
-      name: document.querySelector('#headerTitle h1').textContent,
+      name: state._navProjectName,
+      _direction: 'back',
     });
   } else if (state.currentView === 'chats') {
-    navigate('projects');
+    navigate('projects', { _direction: 'back' });
   }
-});
+}
+
+document.getElementById('backBtn').addEventListener('click', goBack);
+
+// ── Swipe-back gesture ──
+(function initSwipeBack() {
+  const main = document.getElementById('mainContent');
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let swiping = false;
+  let swipeLocked = false;
+
+  main.addEventListener('touchstart', (e) => {
+    if (state.currentView === 'projects' || _navTransitioning) return;
+    const touch = e.touches[0];
+    if (touch.clientX < 24) {
+      swipeStartX = touch.clientX;
+      swipeStartY = touch.clientY;
+      swiping = false;
+      swipeLocked = false;
+    }
+  }, { passive: true });
+
+  main.addEventListener('touchmove', (e) => {
+    if (swipeStartX === 0 || swipeLocked) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - swipeStartX;
+    const dy = Math.abs(touch.clientY - swipeStartY);
+
+    if (!swiping && dx > 10 && dx > dy) {
+      swiping = true;
+      const currentView = document.getElementById(`${state.currentView}View`);
+      if (currentView) currentView.classList.add('swiping');
+    } else if (!swiping && dy > 10) {
+      swipeLocked = true;
+      return;
+    }
+
+    if (swiping && dx > 0) {
+      const currentView = document.getElementById(`${state.currentView}View`);
+      if (currentView) currentView.style.transform = `translateX(${dx}px)`;
+    }
+  }, { passive: true });
+
+  main.addEventListener('touchend', (e) => {
+    if (!swiping) { swipeStartX = 0; return; }
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    const currentView = document.getElementById(`${state.currentView}View`);
+    swiping = false;
+    swipeStartX = 0;
+
+    if (currentView) currentView.classList.remove('swiping');
+
+    if (dx > window.innerWidth * 0.3) {
+      if (currentView) {
+        currentView.style.transform = '';
+      }
+      goBack();
+    } else if (currentView) {
+      currentView.classList.add('swipe-snap-back');
+      currentView.style.transform = 'translateX(0)';
+      currentView.addEventListener('transitionend', () => {
+        currentView.classList.remove('swipe-snap-back');
+        currentView.style.transform = '';
+      }, { once: true });
+    }
+  }, { passive: true });
+})();
+
+// ── Logo home shortcut ──
+(function initLogoHome() {
+  const logo = document.querySelector('.header-logo');
+  if (!logo) return;
+  let pressTimer = null;
+
+  logo.addEventListener('touchstart', (e) => {
+    if (state.currentView === 'projects') return;
+    logo.classList.add('pressed');
+    pressTimer = setTimeout(() => {
+      logo.classList.remove('pressed');
+      navigate('projects', { _direction: 'back' });
+    }, 400);
+  }, { passive: true });
+
+  logo.addEventListener('touchend', () => {
+    clearTimeout(pressTimer);
+    logo.classList.remove('pressed');
+  }, { passive: true });
+
+  logo.addEventListener('touchcancel', () => {
+    clearTimeout(pressTimer);
+    logo.classList.remove('pressed');
+  }, { passive: true });
+})();
+
+// ── Animation helpers ──
+function staggerItems(container, selector = '.list-item') {
+  container.querySelectorAll(selector).forEach((el, i) => {
+    el.style.animationDelay = `${Math.min(i * 40, 400)}ms`;
+  });
+}
 
 // ── Projects ──
 async function loadProjects() {
@@ -168,8 +366,7 @@ async function loadProjects() {
       state.activeWorkspaceName = status.workspaceName;
       if (status.version) {
         state.serverVersion = status.version;
-        const sub = document.getElementById('headerSub');
-        if (sub) sub.textContent = `v${status.version}`;
+        if (state.currentView === 'projects') buildBreadcrumb('projects');
       }
     } catch {}
 
@@ -214,6 +411,7 @@ async function loadProjects() {
     }
 
     list.innerHTML = html;
+    staggerItems(list);
 
     list.querySelectorAll('.section-divider').forEach((toggle) => {
       toggle.addEventListener('click', () => {
@@ -289,6 +487,8 @@ async function loadChats(slug) {
           </div>`;
       })
       .join('');
+
+    staggerItems(list);
 
     list.querySelectorAll('.list-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -814,28 +1014,35 @@ function formatTimeAgo(timestamp) {
 }
 
 function showToast(text, type = 'info', duration = 3000) {
-  const existing = document.querySelector('.toast');
-  if (existing) existing.remove();
+  const existing = document.querySelector('.toast:not(.toast-exit)');
+  if (existing) {
+    existing.classList.add('toast-exit');
+    existing.addEventListener('animationend', () => existing.remove(), { once: true });
+  }
 
   const bgColors = {
-    error: '#7f1d1d',
-    success: '#14532d',
-    warning: '#78350f',
-    info: '#1e293b',
+    error: 'rgba(127, 29, 29, 0.85)',
+    success: 'rgba(20, 83, 45, 0.85)',
+    warning: 'rgba(120, 53, 15, 0.85)',
+    info: 'rgba(30, 41, 59, 0.85)',
   };
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
   toast.textContent = text;
   toast.style.cssText = `
-    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: 80px; left: 50%;
     padding: 8px 18px; border-radius: 20px; font-size: 13px; z-index: 100;
     background: ${bgColors[type] || bgColors.info};
-    color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    color: white; box-shadow: var(--shadow-md);
     max-width: 90vw; text-align: center;
   `;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), duration);
+
+  setTimeout(() => {
+    toast.classList.add('toast-exit');
+    toast.addEventListener('animationend', () => toast.remove(), { once: true });
+  }, duration);
 }
 
 // ── Lightbox / File Preview ──
