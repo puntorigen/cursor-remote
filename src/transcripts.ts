@@ -173,6 +173,65 @@ function getWorkspaceComposerTitles(dbPath: string, composerIds: string[]): Map<
   return titles;
 }
 
+/**
+ * Resolves the transcript file for a chat ID. Supports two layouts:
+ *   macOS/Linux: agent-transcripts/<uuid>/<uuid>.jsonl  (subdir + jsonl)
+ *   Windows:     agent-transcripts/<uuid>.txt            (flat txt file)
+ *   Also handles: agent-transcripts/<uuid>/<uuid>.jsonl on any platform
+ *                 agent-transcripts/<uuid>.jsonl (flat jsonl)
+ * Returns the file path if found, or null.
+ */
+function resolveTranscriptFile(transcriptsDir: string, chatId: string): string | null {
+  // Layout 1: subdir with .jsonl (macOS/Linux default)
+  const subdirJsonl = path.join(transcriptsDir, chatId, `${chatId}.jsonl`);
+  if (fs.existsSync(subdirJsonl)) return subdirJsonl;
+
+  // Layout 2: flat .txt file (Windows default)
+  const flatTxt = path.join(transcriptsDir, `${chatId}.txt`);
+  if (fs.existsSync(flatTxt)) return flatTxt;
+
+  // Layout 3: flat .jsonl file
+  const flatJsonl = path.join(transcriptsDir, `${chatId}.jsonl`);
+  if (fs.existsSync(flatJsonl)) return flatJsonl;
+
+  return null;
+}
+
+/**
+ * Lists all chat IDs found in a transcripts directory, handling both
+ * subdirectory and flat-file layouts.
+ * Returns array of { id, filePath }.
+ */
+function listTranscriptEntries(transcriptsDir: string): { id: string; filePath: string }[] {
+  if (!fs.existsSync(transcriptsDir)) return [];
+
+  const results: { id: string; filePath: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of fs.readdirSync(transcriptsDir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      // Subdir layout: <uuid>/<uuid>.jsonl
+      const jsonlFile = path.join(transcriptsDir, entry.name, `${entry.name}.jsonl`);
+      if (fs.existsSync(jsonlFile) && !seen.has(entry.name)) {
+        seen.add(entry.name);
+        results.push({ id: entry.name, filePath: jsonlFile });
+      }
+    } else if (entry.isFile()) {
+      // Flat layout: <uuid>.txt or <uuid>.jsonl
+      const ext = path.extname(entry.name);
+      if (ext === '.txt' || ext === '.jsonl') {
+        const id = path.basename(entry.name, ext);
+        if (!seen.has(id)) {
+          seen.add(id);
+          results.push({ id, filePath: path.join(transcriptsDir, entry.name) });
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 const TOOL_PATTERNS: Record<string, 'edit' | 'create' | 'delete' | 'read'> = {
   StrReplace: 'edit',
   Write: 'create',
@@ -216,16 +275,11 @@ export function listProjects(): ProjectInfo[] {
       let lastModified = 0;
       let chatCount = 0;
 
-      if (fs.existsSync(transcriptsDir)) {
-        for (const entry of fs.readdirSync(transcriptsDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const jsonlFile = path.join(transcriptsDir, entry.name, `${entry.name}.jsonl`);
-          if (fs.existsSync(jsonlFile)) {
-            chatCount++;
-            const mtime = fs.statSync(jsonlFile).mtimeMs;
-            if (mtime > lastModified) lastModified = mtime;
-          }
-        }
+      const entries = listTranscriptEntries(transcriptsDir);
+      for (const { filePath } of entries) {
+        chatCount++;
+        const mtime = fs.statSync(filePath).mtimeMs;
+        if (mtime > lastModified) lastModified = mtime;
       }
 
       if (lastModified === 0) {
@@ -254,20 +308,17 @@ export function listChats(projectSlug: string): ChatSummary[] {
     projectSlug,
     'agent-transcripts'
   );
-  if (!fs.existsSync(transcriptsDir)) return [];
+
+  const entries = listTranscriptEntries(transcriptsDir);
+  if (entries.length === 0) return [];
 
   const chatIds: string[] = [];
   const chatMeta: { id: string; firstMessage: string; messageCount: number; lastModified: number }[] = [];
 
-  for (const entry of fs.readdirSync(transcriptsDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-
-    const jsonlFile = path.join(transcriptsDir, entry.name, `${entry.name}.jsonl`);
-    if (!fs.existsSync(jsonlFile)) continue;
-
-    const stat = fs.statSync(jsonlFile);
+  for (const { id, filePath } of entries) {
+    const stat = fs.statSync(filePath);
     const lines = fs
-      .readFileSync(jsonlFile, 'utf-8')
+      .readFileSync(filePath, 'utf-8')
       .split('\n')
       .filter((l) => l.trim());
 
@@ -280,9 +331,9 @@ export function listChats(projectSlug: string): ChatSummary[] {
       } catch {}
     }
 
-    chatIds.push(entry.name);
+    chatIds.push(id);
     chatMeta.push({
-      id: entry.name,
+      id,
       firstMessage,
       messageCount: lines.length,
       lastModified: stat.mtimeMs,
@@ -300,14 +351,9 @@ export function listChats(projectSlug: string): ChatSummary[] {
 }
 
 export function getChat(projectSlug: string, chatId: string): TranscriptMessage[] {
-  const jsonlFile = path.join(
-    CURSOR_PROJECTS_DIR,
-    projectSlug,
-    'agent-transcripts',
-    chatId,
-    `${chatId}.jsonl`
-  );
-  if (!fs.existsSync(jsonlFile)) return [];
+  const transcriptsDir = path.join(CURSOR_PROJECTS_DIR, projectSlug, 'agent-transcripts');
+  const jsonlFile = resolveTranscriptFile(transcriptsDir, chatId);
+  if (!jsonlFile) return [];
 
   const lines = fs
     .readFileSync(jsonlFile, 'utf-8')
@@ -343,14 +389,9 @@ export function getChatSince(
 }
 
 export function getChatFileSize(projectSlug: string, chatId: string): number {
-  const jsonlFile = path.join(
-    CURSOR_PROJECTS_DIR,
-    projectSlug,
-    'agent-transcripts',
-    chatId,
-    `${chatId}.jsonl`
-  );
-  if (!fs.existsSync(jsonlFile)) return 0;
+  const transcriptsDir = path.join(CURSOR_PROJECTS_DIR, projectSlug, 'agent-transcripts');
+  const jsonlFile = resolveTranscriptFile(transcriptsDir, chatId);
+  if (!jsonlFile) return 0;
   return fs.statSync(jsonlFile).mtimeMs;
 }
 

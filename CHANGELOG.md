@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.23 — 2026-03-14
+
+### Fix Windows transcript discovery
+- On Windows, Cursor stores transcripts as flat `.txt` files directly in `agent-transcripts/` (e.g. `<uuid>.txt`), not in subdirectories with `.jsonl` extension like macOS/Linux (`<uuid>/<uuid>.jsonl`).
+- All transcript functions (`listProjects`, `listChats`, `getChat`, `getChatFileSize`) now use a unified discovery layer that supports both layouts transparently.
+- Fixed `slugToPath` and `pathToSlug` to handle Windows drive letters and backslashes.
+
 ## v1.0.22 — 2026-03-14
 
 ### Fix: v1.0.19–v1.0.21 shipped with stale bundle
