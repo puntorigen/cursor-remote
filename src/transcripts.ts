@@ -255,10 +255,13 @@ export function slugToPath(slug: string): string {
 
 export function pathToSlug(fsPath: string): string {
   if (process.platform === 'win32') {
-    // "c:\Users\josem\OneDrive" → "c-Users-josem-OneDrive"
+    // "c:\Users\josem\OneDrive\Escritorio\pagina auto" → "c-Users-josem-OneDrive-Escritorio-pagina-auto"
+    // Cursor replaces drive colon, path separators, AND spaces with dashes
     return fsPath
-      .replace(/^([a-zA-Z]):[\\\/]/, '$1-')  // drive letter
-      .replace(/[\\\/]/g, '-');
+      .replace(/^([a-zA-Z]):[\\\/]/, '$1-')
+      .replace(/[\\\/\s]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/-$/, '');
   }
   return fsPath.replace(/^\//, '').replace(/\//g, '-');
 }

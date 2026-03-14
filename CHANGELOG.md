@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.24 — 2026-03-14
+
+### Fix Windows open-window detection
+- `pathToSlug` now also replaces spaces with dashes to match Cursor's slug format on Windows (e.g. `pagina auto` → `pagina-auto`).
+- Projects with open Cursor windows now correctly show the "open" indicator on the web UI.
+
 ## v1.0.23 — 2026-03-14
 
 ### Fix Windows transcript discovery
