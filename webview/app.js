@@ -27,6 +27,23 @@ const API = {
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return res.json();
   },
+
+  async prompt(text, placeholder) {
+    return this.post('/prompt', { prompt: text, placeholder });
+  },
+
+  async query(text, model) {
+    return this.post('/query', { prompt: text, model });
+  },
+
+  async queryJson(prompt, schema, options) {
+    return this.post('/query/json', {
+      prompt,
+      schema,
+      model: options?.model,
+      retries: options?.retries,
+    });
+  },
 };
 
 // ── State ──

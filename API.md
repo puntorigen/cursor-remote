@@ -476,13 +476,35 @@ this.injector.isPatchAvailable();  // boolean
 this.injector.getMethod();         // 'patched-submit' | 'clipboard' | 'none'
 ```
 
+### Frontend Helpers (`webview/app.js`)
+
+The `API` object in the web UI provides convenience wrappers that handle token auth and JSON serialization:
+
+```javascript
+// One-shot query, default model
+const r = await API.prompt("Summarize this code");
+// r: { ok, result?, error? }
+
+// Model-selectable query
+const r = await API.query("Explain async/await", "claude-3.5-sonnet");
+// r: { ok, result?, error? }
+
+// Structured JSON query with auto-parse and retry
+const r = await API.queryJson(
+  "Analyze this conversation",
+  { title: "string", summary: "string", topics: ["string"] },
+  { model: "claude-3.5-sonnet", retries: 1 }
+);
+// r: { ok, data?, raw?, error? }
+```
+
 ### When to use what
 
 | You're writing code in... | Use |
 |---------------------------|-----|
 | `server.ts` or any extension-side module | `this.injector.prompt()` / `.query()` / `.queryJson()` directly |
-| `webview/app.js` (browser frontend) | HTTP endpoints: `API.post('/prompt', ...)` |
-| External tool / script / `curl` | HTTP endpoints: `POST /api/prompt`, `/api/query`, `/api/query/json` |
+| `webview/app.js` (browser frontend) | `API.prompt()` / `API.query()` / `API.queryJson()` |
+| External tool / script / `curl` | HTTP: `POST /api/prompt`, `/api/query`, `/api/query/json` |
 
 ---
 
