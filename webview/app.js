@@ -48,6 +48,7 @@ const state = {
   currentMode: 'agent',
   currentModel: 'default',
   modesAndModelsLoaded: false,
+  serverVersion: null,
 };
 
 // ── Markdown setup ──
@@ -96,7 +97,7 @@ function navigate(view, opts = {}) {
   switch (view) {
     case 'projects':
       headerTitle.textContent = 'Cursor Remote';
-      headerSub.textContent = '';
+      headerSub.textContent = state.serverVersion ? `v${state.serverVersion}` : '';
       stopPolling();
       loadProjects();
       break;
@@ -148,6 +149,11 @@ async function loadProjects() {
       const status = await API.get('/status');
       state.activeWorkspace = status.workspace;
       state.activeWorkspaceName = status.workspaceName;
+      if (status.version) {
+        state.serverVersion = status.version;
+        const sub = document.getElementById('headerSub');
+        if (sub) sub.textContent = `v${status.version}`;
+      }
     } catch {}
 
     const projects = await API.get('/projects');

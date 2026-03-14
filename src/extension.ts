@@ -9,6 +9,9 @@ import { ensurePatch, applyPatch, removePatch, isPatchApplied } from './patcher'
 import { checkForUpdate, performUpdate } from './updater';
 import { pathToSlug } from './transcripts';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const EXT_VERSION: string = require('../package.json').version;
+
 let server: RemoteServer | null = null;
 let tunnel: TunnelManager | null = null;
 let statusBarItem: vscode.StatusBarItem;
@@ -525,6 +528,12 @@ async function showUrlPanel(
     h1 {
       font-size: 22px;
       font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .version {
+      color: #666;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
       margin-bottom: 6px;
     }
     .subtitle {
@@ -580,6 +589,7 @@ async function showUrlPanel(
 </head>
 <body>
   <h1>Cursor Remote</h1>
+  <p class="version">v${EXT_VERSION}</p>
   <p class="subtitle">Scan the QR code with your phone to connect</p>
   <div class="qr-container">${qrSvg}</div>
   <p class="label">Public URL</p>

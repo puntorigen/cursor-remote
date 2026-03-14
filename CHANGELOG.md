@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.35 — 2026-03-14
+
+### Show version in web UI and QR panel
+- The extension version is now displayed in the web UI header subtitle on the projects page (e.g. "v1.0.35").
+- The QR code webview panel inside Cursor shows the version below the title.
+- `/api/status` now returns the real version from `package.json` instead of the hardcoded `0.1.0`.
+
 ## v1.0.34 — 2026-03-14
 
 ### Fix: Secondary windows produced invalid tunnel URLs

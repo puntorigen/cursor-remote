@@ -18,6 +18,9 @@ import { getGitStatus, getFileDiff, getGitDiffStat } from './files';
 import { MessageInjector } from './injector';
 import { getPatcherDebugInfo, applyPatch as applyPatchFn } from './patcher';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const EXT_VERSION: string = require('../package.json').version;
+
 function parseCookie(cookieStr: string, name: string): string | null {
   const match = cookieStr.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
@@ -375,7 +378,7 @@ export class RemoteServer {
       const wsPath = wsFolder?.uri.fsPath || null;
       const wsName = wsFolder?.name || null;
       res.json({
-        version: '0.1.0',
+        version: EXT_VERSION,
         workspace: wsPath,
         workspaceName: wsName,
         injectionMethod: this.injector.getMethod(),
