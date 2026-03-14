@@ -1,0 +1,46 @@
+---
+description: Build pipeline and release process for Cursor extensions
+globs: package.json,CHANGELOG.md
+alwaysApply: false
+---
+
+# Build and Release
+
+## Critical: Always Rebuild Before Packaging
+
+`vsce package` does NOT automatically run the build. It packages whatever is in `dist/`. If you change source but don't rebuild, you ship stale code.
+
+```json
+"scripts": {
+  "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --sourcemap",
+  "package": "npm run build && vsce package --no-dependencies"
+}
+```
+
+Always use `npm run package` (which chains build), never `vsce package` alone.
+
+## Release Checklist
+
+1. Bump version in `package.json`
+2. Update `CHANGELOG.md` with new version section
+3. Run `npm run package` (builds then packages)
+4. `git add -A && git commit`
+5. `git tag v<version>`
+6. `git push origin main --tags`
+7. Create GitHub release with VSIX asset
+
+## Patch Re-application
+
+When the patch code changes (new DI tokens, new commands, modified injection code), the existing patch becomes stale. The extension detects this because the sentinel is present but the new commands aren't registered. The `ensurePatch` flow handles this:
+
+- On activation, `isPatchApplied()` checks for the sentinel
+- If sentinel is found but commands don't respond in `verifyPatchedCommands()`, `patchAvailable` is set to false
+- To force re-patch: remove the old backup, call `removePatch`, then `applyPatch`
+- Note in CHANGELOG when a version requires patch re-application
+
+## VSIX Installation on Windows
+
+The auto-updater must handle Windows differences:
+- Use `cp.exec()` not `cp.execFile()` for `cursor.cmd`
+- Increase timeout to 60s on Windows
+- Fall back to `vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(path))`

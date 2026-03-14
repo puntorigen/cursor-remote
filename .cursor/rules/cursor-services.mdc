@@ -1,0 +1,89 @@
+---
+description: Cursor internal services — composer, modes, models, and how to interact with them via injected commands
+globs: src/patcher.ts,src/injector.ts
+alwaysApply: false
+---
+
+# Cursor Internal Services
+
+## Available Services (via createDecorator)
+
+| Service | DI String | Purpose |
+|---------|-----------|---------|
+| `composerDataService` | `"composerDataService"` | Manages composer data, handles, and state |
+| `composerChatService` | `"composerChatService"` | Submits messages, manages chat flow |
+| `composerEventService` | `"composerEventService"` | Fires events (e.g. force text update) |
+| `composerViewsService` | `"composerViewsService"` | Controls UI views, focus, scroll |
+| `composerModesService` | `"composerModesService"` | Agent/Plan/Ask/Debug mode switching |
+| `modelConfigService` | `"modelConfigService"` | Model selection and configuration |
+
+## Key Methods
+
+### composerDataService (DS)
+- `getHandleIfLoaded(composerId)` — returns handle or null
+- `updateComposerData(handle, {text, richText})` — updates input text
+- `selectedComposerId` — currently focused composer
+- `allComposersData.allComposers` — all composers with metadata
+- `allComposersData.selectedComposerIds` — open composer IDs
+- `getComposerData(handle)` — full composer data including modelConfig
+
+### composerChatService (CS)
+- `submitChatMaybeAbortCurrent(composerId, text, opts)` — main submission
+  - `opts.modelOverride` — override model for this request
+  - `opts.forceBubbleId` — force specific bubble
+  - `opts.skipClearInput` — don't clear input after submit
+  - `opts.isPlanExecution` — executing a plan
+
+### composerEventService (ES)
+- `fireShouldForceText({composerId})` — forces UI to update with new text
+
+### composerViewsService (VS)
+- `showAndFocus(composerId)` — activates and focuses a composer tab
+
+### composerModesService (MS)
+- `setComposerUnifiedMode(handle, modeId)` — set mode (must be called BEFORE submit)
+- `getComposerUnifiedMode(composerId)` — get current mode
+- `getAllModes()` — returns `[{id, name, icon, description, ...}]`
+- Available modes: `agent`, `plan`, `chat` (Ask), `debug`, `triage`, `spec`, `project`, `background`
+
+### modelConfigService (MC)
+- `setModelConfigForComposer(handle, {modelName})` — set model on specific composer
+- `setModelConfig("composer", {modelName, maxMode})` — set global composer model
+- `getModelConfig("composer")` — get current config
+- `getAvailableDefaultModels()` — list of `{name, displayName, defaultOn, ...}`
+- `getSelectedModelsForComposer(handle)` — models selected on a composer
+
+## Wait-for-Handle Pattern
+
+Composer handles may not be loaded immediately after `showAndFocus`. Always poll:
+
+```javascript
+await vs.showAndFocus(composerId);
+var h = ds.getHandleIfLoaded(composerId);
+if (!h) {
+  for (var w = 0; w < 40; w++) {
+    await new Promise(function(r) { setTimeout(r, 50) });
+    h = ds.getHandleIfLoaded(composerId);
+    if (h) break;
+  }
+}
+```
+
+## Mode Must Be Set Before Submit
+
+`submitChatMaybeAbortCurrent` reads the mode via `getComposerUnifiedMode(composerId)` internally. The mode must be set on the handle **before** calling submit:
+
+```javascript
+if (e.mode) ms.setComposerUnifiedMode(h, e.mode);
+if (e.modelOverride) mc.setModelConfigForComposer(h, {modelName: e.modelOverride});
+// Then submit
+await cs.submitChatMaybeAbortCurrent(t, text, {modelOverride: e.modelOverride});
+```
+
+## Injection Code Style
+
+Injected code must be compatible with comma-expression context (inserted after a `registerCommand()` call). Rules:
+- No arrow functions at the top level of the comma expression on older builds; use `async(n,e)=>{}` inside `registerCommand` calls
+- Use `var` not `let`/`const` (minifier compatibility)
+- Use `function` keyword for nested callbacks if arrow functions cause parsing issues
+- All code must be a single expression (no standalone statements)

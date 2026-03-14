@@ -1,0 +1,44 @@
+---
+description: Remote diagnostics and debugging endpoints for Cursor extensions
+globs: src/server.ts
+alwaysApply: false
+---
+
+# Remote Diagnostics
+
+When the extension runs on a remote machine (accessible via cloudflared tunnel), you cannot debug locally. Always ship diagnostic endpoints.
+
+## Essential Debug Endpoints
+
+### `/api/diagnostics`
+Returns: platform, patch status, command availability, selected composer, recommendation.
+
+### `/api/debug/patcher`
+Returns: `appRoot`, `execPath`, all candidate paths with `existsReal`/`existsAsar` status, directory listings around key paths, ASAR file detection, whether `original-fs` is in use.
+
+This is critical for diagnosing "file not found" on platforms you can't access.
+
+### `/api/debug/patcher/apply` (POST)
+Triggers patch application remotely. Returns the `PatchStatus` result. After success, calls `injector.refreshPatchAvailability()`.
+
+### `/api/debug/projects`
+Platform-specific filesystem probe: project directories, transcript listings, alternate storage locations, environment variables.
+
+## Design Principles
+
+- Always compare `realFs` (original-fs) vs `fs` (ASAR-aware) in diagnostics
+- List directory contents at each level of the expected path hierarchy
+- Check alternate installation locations per platform
+- Include environment variables (`APPDATA`, `LOCALAPPDATA`) in output
+- Return structured JSON for easy parsing from curl/fetch
+- All debug endpoints should be safe (read-only where possible)
+- POST endpoints for actions (apply patch) should return before/after state
+
+## Remote Patch Application Flow
+
+When diagnosing a broken patch remotely:
+1. `GET /api/debug/patcher` — see what paths exist and why resolution failed
+2. `GET /api/diagnostics` — verify patch status and command availability
+3. `POST /api/debug/patcher/apply` — trigger patch application
+4. `GET /api/diagnostics` — verify patch took effect
+5. If patch needs reload, the user must reload Cursor manually (or use the reload endpoint)

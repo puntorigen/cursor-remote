@@ -1,0 +1,54 @@
+---
+description: Multi-window coordination for Cursor extensions — primary gateway, proxying, reload
+globs: src/server.ts,src/extension.ts
+alwaysApply: false
+---
+
+# Multi-Window Coordination
+
+## Architecture
+
+Each Cursor window runs its own extension instance with its own HTTP server. The first window that binds to the primary port (7842) becomes the **gateway**. Other windows auto-increment ports and register as **secondaries**.
+
+## Port Binding
+
+```
+Primary: port 7842 (or configured port)
+Secondary: 7843, 7844, ... (auto-increment on EADDRINUSE)
+```
+
+## Registration Protocol
+
+- Secondary → Primary: `POST /api/_register { slug, workspace, port }`
+- On shutdown: `POST /api/_unregister { port }`
+- Debug: `GET /api/_registry` returns all registered windows
+
+## Request Proxying
+
+Window-specific endpoints (`/api/send`, `/api/modes-and-models`, etc.) accept a `slug` parameter. The primary gateway:
+
+1. Checks if `slug` maps to a registered secondary
+2. If yes, proxies the request to `127.0.0.1:secondaryPort`
+3. Sets `X-Forwarded-By: cursor-remote-gateway` header (trusted, skips auth)
+4. If no match, handles locally
+
+## Reload Coordination
+
+When a "reload all windows" is needed (e.g., after patching or updating):
+
+- **From secondary**: POST to primary `/api/_reloadAll`, then reload self after 300ms
+- **From primary**: POST `/api/_reload` to each registered secondary, reload self after 500ms
+- `POST /api/_reload` responds immediately, then triggers `workbench.action.reloadWindow` after 200ms
+- If primary is unreachable, secondary reloads only itself
+
+## Tunnel
+
+Only the primary window starts the cloudflared tunnel. Secondaries never start tunnels.
+
+## Composer ID Resolution
+
+The web UI uses transcript file UUIDs as chat IDs, but Cursor uses internal composer IDs. Resolution:
+1. Get live composer state via `_getState`
+2. Check if transcript UUID exists in `allComposers` list
+3. If match found, use it directly (transcript UUID = composer ID in most cases)
+4. If no match, fall back to `selectedComposerId`

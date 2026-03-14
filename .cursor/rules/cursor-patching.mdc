@@ -1,0 +1,99 @@
+---
+description: Cursor workbench patching — DI discovery, injection, integrity, ASAR, elevation
+globs: src/patcher.ts
+alwaysApply: false
+---
+
+# Cursor Workbench Patching
+
+## Workbench File Location
+
+Cursor's main UI code lives in `workbench.desktop.main.js` at `<appRoot>/out/vs/workbench/`. Finding it requires multiple strategies because installation paths vary:
+
+1. `vscode.env.appRoot` + relative path (most reliable)
+2. Strip `resources/app` suffix and re-add it (ASAR virtual path normalization)
+3. `path.dirname(process.execPath)` + `resources/app/...`
+4. `app.asar.unpacked` variants for Electron ASAR packaging
+5. Platform defaults: `/Applications/Cursor.app/...` (mac), `LOCALAPPDATA\Programs\Cursor\...` (win), `/opt/Cursor/...` (linux)
+
+Always deduplicate and cache the resolved path.
+
+## ASAR Handling
+
+Electron's `fs` module transparently reads from `.asar` archives. For **patching** you need the real file on disk.
+
+- Import `original-fs` via `require('original-fs')` — bypasses ASAR interception
+- Fall back to standard `fs` if `original-fs` is unavailable
+- Use `realFs` (original-fs) for all patcher I/O: `existsSync`, `readFileSync`, `writeFileSync`, `copyFileSync`, `renameSync`
+- Use standard `fs` only to check if a file is visible through ASAR (for extraction fallback)
+
+## Dynamic Variable Discovery
+
+Cursor minifies all variable names on each build. Never hardcode minified names. Instead, discover them at patch time using **stable string literals** that survive minification:
+
+```
+// Each service is registered via createDecorator("serviceName")
+// Match: VarName=FuncName("serviceName") 
+const re = /([A-Za-z_$][A-Za-z0-9_$]*)=([A-Za-z_$][A-Za-z0-9_$]*)\("composerDataService"\)/;
+```
+
+Stable service IDs: `composerDataService`, `composerChatService`, `composerEventService`, `composerViewsService`, `composerModesService`, `modelConfigService`
+
+For CommandsRegistry, find `.registerCommand("composer.acceptPlan"` or other known stable command IDs.
+
+## Injection Point
+
+Find a known command registration as an anchor, walk parentheses to find the end of the `registerCommand(...)` call, insert patch code after it as a comma-separated expression:
+
+```javascript
+// Existing code: Registry.registerCommand("composer.acceptPlan", ...)
+// Patch is inserted as: ),/* SENTINEL */Registry.registerCommand("cursorRemote._submitChat", ...)
+```
+
+## Syntax Validation
+
+Always validate generated patch code with `vm.Script` before writing:
+
+```typescript
+new vm.Script(`(async function(){0${patchCode}})`, { filename: 'patch-validation.js' });
+```
+
+The `0` prefix is needed because `patchCode` starts with `,`.
+
+## Integrity Checksum
+
+After patching, update `product.json` so Cursor's integrity check passes:
+- Compute: `crypto.createHash('sha256').update(content).digest('base64').replace(/=+$/, '')`
+- Update `product.json` → `checksums["vs/workbench/workbench.desktop.main.js"]`
+- Suppress notification: write `{dontShowPrompt:true,commit}` to `integrityService` key in `state.vscdb` via `sqlite3` CLI
+
+Treat checksum update failures as non-fatal (log warning).
+
+## Atomic Writes
+
+- POSIX: temp file → `fsync` → `rename` (atomic)
+- Windows: `rename` fails with EPERM on memory-mapped files; fall back to `copyFileSync` + `unlinkSync`
+- Always use `realFs` (original-fs), never ASAR-intercepted `fs`
+
+## Windows Elevation (C:\Program Files)
+
+When direct write fails with EPERM/EACCES:
+1. Try `icacls "${dir}" /grant "%USERNAME%":F /T /Q`
+2. If that works, retry direct write
+3. If not, write patched content to temp dir, spawn elevated `cmd.exe` via PowerShell:
+   `Start-Process -FilePath cmd.exe -ArgumentList '/c script.bat' -Verb RunAs -Wait -WindowStyle Hidden`
+4. Verify sentinel is present after elevation
+
+## Reload Loop Protection
+
+Use `context.globalState` key `patchReloadPending`:
+1. Already patched → clear flag, return true
+2. Flag set but not patched → previous reload failed; show warning, don't loop
+3. Not patched, no flag → apply patch, set flag, trigger `workbench.action.reloadWindow`
+
+## Backup and Recovery
+
+- Backup: `workbench.desktop.main.js.cursor-remote-backup` (only create if not exists)
+- Ship standalone restore scripts next to the workbench file:
+  - Windows: `.bat` file with `copy /Y` 
+  - macOS/Linux: `.sh` file (mode 0o755)

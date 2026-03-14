@@ -1,0 +1,88 @@
+---
+description: Windows-specific platform issues and workarounds for Cursor extensions
+globs: src/**/*.ts
+alwaysApply: false
+---
+
+# Windows Platform Rules
+
+## Cursor CLI on Windows
+
+`cursor` on Windows is `cursor.cmd` (a batch file), not a binary executable.
+
+- `cp.execFile('cursor', args)` → **EINVAL** (cannot run batch files)
+- `cp.exec('cursor --install-extension "path"', opts)` → works (shell resolves `.cmd`)
+- Always use `cp.exec()` for `cursor.cmd` invocations on Windows
+- Always fall back to `vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(path))` if CLI fails
+- Use longer timeouts on Windows (60s vs 30s)
+
+## File Paths and Slugs
+
+Cursor stores projects under `~/.cursor/projects/<slug>/`. On Windows:
+
+- **Path to slug**: `c:\Users\josem\OneDrive\Escritorio\pagina auto` → `c-Users-josem-OneDrive-Escritorio-pagina-auto`
+  - Drive colon stripped: `c:\` → `c-`
+  - Backslashes → dashes
+  - **Spaces → dashes** (critical: often missed)
+  - Collapse multiple dashes, trim trailing dash
+- **Slug to path**: First char is drive letter if `parts[0].length === 1`
+  - `c-Users-josem-OneDrive` → `c:\Users\josem\OneDrive`
+
+## Transcript Formats
+
+- **macOS/Linux**: `agent-transcripts/<uuid>/<uuid>.jsonl` — one JSON object per line
+- **Windows**: `agent-transcripts/<uuid>.txt` — plain text with `user:` / `assistant:` role markers on separate lines, or flat `.jsonl`
+
+Auto-detect format: try `JSON.parse` on the first non-empty line. If it parses, it's JSONL; otherwise plain text.
+
+## Windows Plain-Text Transcripts
+
+Structure:
+```
+user:
+Hello, can you help me?
+assistant:
+[Thinking]
+Let me think about this...
+[Tool call] Shell
+ command: ls -la
+[Tool result] Shell
+ ...output...
+Sure, here's what I found...
+```
+
+Parsing rules:
+- Split by `user:` / `assistant:` markers (each on its own line)
+- Merge consecutive `assistant:` segments (tool calls create multiple)
+- Strip `[Thinking]` blocks
+- Compact `[Tool call]` blocks into one-line summaries
+- Strip `[Tool result]` lines
+- Absorb `Task` and `TodoWrite` tool calls silently
+
+## EPERM on Protected Directories
+
+Windows installs in `C:\Program Files\cursor\` require elevation for writes:
+1. Try `icacls` grant first (no UAC prompt)
+2. Fall back to PowerShell `Start-Process -Verb RunAs` (UAC prompt)
+3. Write to temp dir first, then elevated copy to target
+
+## Cursor Storage Paths (Windows)
+
+- Global state: `%APPDATA%\Cursor\User\globalStorage\state.vscdb`
+- Workspace storage: `%APPDATA%\Cursor\User\workspaceStorage\`
+- Projects: `%USERPROFILE%\.cursor\projects\`
+- NOT in `%LOCALAPPDATA%` for project data (only for the Cursor installation itself)
+
+## Extension Activation Resilience
+
+Create the status bar item FIRST before any heavy work:
+```typescript
+export async function activate(context) {
+  statusBarItem = vscode.window.createStatusBarItem(...);
+  statusBarItem.show();
+  try { await doActivate(context); } 
+  catch (err) { statusBarItem.text = '$(error) Error'; }
+}
+```
+
+Wrap `ensurePatch` in its own try-catch so the rest of the extension still loads even if patching fails.
