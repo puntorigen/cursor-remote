@@ -417,6 +417,75 @@ These endpoints use the `/api/_` prefix and skip authentication. They are only a
 
 ---
 
+## Internal TypeScript API (`MessageInjector`)
+
+When writing server-side logic within the extension (e.g. in `server.ts` or a new module), use the `MessageInjector` instance directly — no HTTP round-trip needed. The `RemoteServer` class has access via `this.injector`.
+
+### LLM Methods
+
+```typescript
+// One-shot query, default model
+const r = await this.injector.prompt("Summarize this code", "");
+// r: { ok: boolean, result?: string, error?: string }
+
+// Model-selectable query
+const r = await this.injector.query("Explain async/await", "claude-3.5-sonnet");
+// r: { ok: boolean, result?: string, error?: string }
+
+// Structured JSON query with auto-parse and retry
+const r = await this.injector.queryJson<MyType>(
+  "Analyze this conversation",
+  { title: "string", summary: "string", topics: ["string"] },
+  { model: "claude-3.5-sonnet", retries: 1 }
+);
+// r: { ok: boolean, data?: MyType, raw?: string, error?: string }
+```
+
+### Chat Injection Methods
+
+```typescript
+// Send a message to a composer (submits immediately)
+const r = await this.injector.send("Fix the bug", composerId, {
+  mode: "agent",           // optional: agent, ask, plan
+  modelOverride: "gpt-4o"  // optional
+});
+// r: { success, method, details, composerId?, error? }
+
+// Set text without submitting (preview/review workflow)
+const r = await this.injector.setText("Draft message", composerId);
+// r: { success, method, details, composerId?, error? }
+```
+
+### State & Configuration Methods
+
+```typescript
+// Composer state (open tabs, selected composer)
+const state = await this.injector.getComposerState();
+// state: { ok, selectedComposerId?, openComposerIds?, composers?, error? }
+
+// Available modes and models
+const mm = await this.injector.getModesAndModels();
+// mm: { ok, modes?, models?, currentMode?, currentModel?, error? }
+
+// Diagnostics
+const diag = await this.injector.diagnose();
+// diag: { platform, patchApplied, patchedCommandsAvailable, selectedComposerId, openComposerCount, recommendation }
+
+// Check patch status
+this.injector.isPatchAvailable();  // boolean
+this.injector.getMethod();         // 'patched-submit' | 'clipboard' | 'none'
+```
+
+### When to use what
+
+| You're writing code in... | Use |
+|---------------------------|-----|
+| `server.ts` or any extension-side module | `this.injector.prompt()` / `.query()` / `.queryJson()` directly |
+| `webview/app.js` (browser frontend) | HTTP endpoints: `API.post('/prompt', ...)` |
+| External tool / script / `curl` | HTTP endpoints: `POST /api/prompt`, `/api/query`, `/api/query/json` |
+
+---
+
 ## Authentication
 
 All public endpoints require one of:
