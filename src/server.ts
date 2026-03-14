@@ -514,6 +514,33 @@ export class RemoteServer {
       }
     });
 
+    this.app.get('/api/projects/:slug/chats/:id/live', async (req, res) => {
+      try {
+        const chatId = req.params.id;
+        const slug = req.params.slug;
+        const conv = await this.injector.getConversation(chatId);
+
+        if (conv.ok && conv.loaded) {
+          res.json({
+            source: 'memory',
+            isStreaming: conv.isStreaming ?? false,
+            composerId: chatId,
+            bubbles: conv.bubbles ?? [],
+          });
+        } else {
+          const messages = getChat(slug, chatId);
+          res.json({
+            source: 'disk',
+            isStreaming: false,
+            composerId: chatId,
+            messages,
+          });
+        }
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     this.app.get('/api/projects/:slug/chats/:id/files', (req, res) => {
       try {
         res.json(getAiModifiedFiles(req.params.slug, req.params.id));

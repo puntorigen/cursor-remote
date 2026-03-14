@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.40 — 2026-03-14
+
+### Live-primary chat data
+- **Live bubbles**: Chat messages are now sourced from Cursor's in-memory state when available, showing richer data than disk transcripts (tool calls, code blocks, per-bubble structure).
+- **Streaming visibility**: Active agent responses appear in real-time with a blinking cursor and glow border while Cursor is generating, using 500ms adaptive polling.
+- **Tool call rendering**: Tool calls (Shell, Read, Write, etc.) render as structured cards with tool name, status badge, and collapsible parameter/result sections.
+- **DOM patching**: Poll updates only touch changed bubbles instead of re-rendering the full conversation, preserving scroll position.
+- **Disk fallback**: Conversations not loaded in Cursor's memory automatically fall back to disk transcript rendering -- no breaking changes.
+- **New patch command**: `cursorRemote._getConversation` reads `composerDataService.getLoadedConversation()` and maps each bubble with `getComposerBubble()`, including `generatingBubbleIds` for streaming detection.
+- **New API endpoint**: `GET /api/projects/:slug/chats/:id/live` returns `{ source: 'memory'|'disk', isStreaming, bubbles|messages }`.
+
 ## v1.0.39 — 2026-03-10
 
 ### Premium web UI overhaul

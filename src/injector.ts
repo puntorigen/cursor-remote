@@ -60,6 +60,23 @@ export interface ModesAndModelsResult {
   error?: string;
 }
 
+export interface LiveBubble {
+  bubbleId: string;
+  type: 'human' | 'ai';
+  text: string;
+  codeBlocks?: { code: string; language?: string; uri?: string }[];
+  toolCall?: { tool: string; params?: unknown; status?: string; result?: string };
+  isGenerating: boolean;
+}
+
+export interface ConversationResult {
+  ok: boolean;
+  loaded?: boolean;
+  isStreaming?: boolean;
+  bubbles?: LiveBubble[];
+  error?: string;
+}
+
 export class MessageInjector {
   private lastMethod: InjectionMethod = 'none';
   private patchAvailable = false;
@@ -158,6 +175,21 @@ export class MessageInjector {
         'cursorRemote._getModesAndModels',
       );
       return result ?? { ok: false, error: 'No response from _getModesAndModels' };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async getConversation(composerId: string): Promise<ConversationResult> {
+    if (!this.patchAvailable) {
+      return { ok: false, error: 'Patch not applied' };
+    }
+    try {
+      const result = await vscode.commands.executeCommand<ConversationResult>(
+        'cursorRemote._getConversation',
+        { composerId },
+      );
+      return result ?? { ok: false, error: 'No response from _getConversation' };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

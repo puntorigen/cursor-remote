@@ -66,6 +66,10 @@ const state = {
   currentModel: 'default',
   modesAndModelsLoaded: false,
   serverVersion: null,
+  chatSource: null,
+  isStreaming: false,
+  bubbles: [],
+  bubbleTextCache: {},
 };
 
 // ── Markdown setup ──
@@ -506,11 +510,23 @@ async function loadChat(slug, chatId) {
   container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading conversation...</div>';
 
   try {
-    const data = await API.get(`/projects/${slug}/chats/${chatId}`);
-    state.messages = data.messages;
-    state.messageCount = data.messages.length;
-    state.lastModified = Date.now();
-    renderMessages(data.messages);
+    const data = await API.get(`/projects/${slug}/chats/${chatId}/live`);
+    state.chatSource = data.source;
+    state.isStreaming = data.isStreaming || false;
+
+    if (data.source === 'memory' && data.bubbles) {
+      state.bubbles = data.bubbles;
+      state.bubbleTextCache = {};
+      renderBubbles(data.bubbles);
+    } else {
+      state.messages = data.messages || [];
+      state.messageCount = state.messages.length;
+      state.lastModified = Date.now();
+      state.bubbles = [];
+      state.bubbleTextCache = {};
+      renderMessages(state.messages);
+    }
+
     scrollToBottom();
     startPolling(slug, chatId);
     setTimeout(scrollToBottom, 300);
@@ -550,30 +566,181 @@ function appendMessages(newMessages) {
   if (wasAtBottom) scrollToBottom();
 }
 
+// ── Live Bubble Rendering ──
+function renderBubbleHtml(b) {
+  const roleLabel = b.type === 'human' ? 'You' : 'Cursor';
+  const roleClass = b.type === 'human' ? 'user' : 'assistant';
+  const streamClass = b.isGenerating ? ' streaming' : '';
+
+  let content = '';
+
+  if (b.toolCall && b.toolCall.tool) {
+    content += renderToolCall(b.toolCall);
+  }
+
+  if (b.text) {
+    content += renderMarkdown(b.text);
+  }
+
+  if (b.codeBlocks && b.codeBlocks.length && !b.text) {
+    for (const cb of b.codeBlocks) {
+      const lang = cb.language || '';
+      const langLabel = lang ? `<span class="code-lang">${escHtml(lang)}</span>` : '';
+      let highlighted;
+      try {
+        if (lang && hljs.getLanguage(lang)) {
+          highlighted = hljs.highlight(cb.code, { language: lang }).value;
+        } else {
+          highlighted = hljs.highlightAuto(cb.code).value;
+        }
+      } catch {
+        highlighted = escHtml(cb.code);
+      }
+      content += `<pre><code class="hljs">${langLabel}${highlighted}</code></pre>`;
+    }
+  }
+
+  if (b.isGenerating && !content.trim()) {
+    content = '<span class="typing-indicator"></span>';
+  }
+
+  return `<div class="msg ${roleClass}${streamClass}" data-bubble-id="${escAttr(b.bubbleId)}">
+    <div class="role-label">${roleLabel}</div>
+    ${content}
+    ${b.isGenerating ? '<span class="streaming-cursor"></span>' : ''}
+  </div>`;
+}
+
+function renderToolCall(tc) {
+  const toolName = tc.tool || 'Unknown tool';
+  const statusLabel = tc.status || '';
+  const statusClass = statusLabel === 'completed' ? 'tool-done' : statusLabel === 'running' ? 'tool-running' : '';
+
+  let paramsHtml = '';
+  if (tc.params) {
+    try {
+      const paramStr = typeof tc.params === 'string' ? tc.params : JSON.stringify(tc.params, null, 2);
+      if (paramStr && paramStr !== '{}') {
+        paramsHtml = `<details class="tool-details"><summary>Parameters</summary><pre class="tool-params">${escHtml(paramStr)}</pre></details>`;
+      }
+    } catch {}
+  }
+
+  let resultHtml = '';
+  if (tc.result) {
+    const resultStr = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2);
+    if (resultStr) {
+      const truncated = resultStr.length > 500 ? resultStr.slice(0, 500) + '...' : resultStr;
+      resultHtml = `<details class="tool-details"><summary>Result</summary><pre class="tool-result">${escHtml(truncated)}</pre></details>`;
+    }
+  }
+
+  return `<div class="tool-call ${statusClass}">
+    <span class="tool-name">${escHtml(toolName)}</span>
+    ${statusLabel ? `<span class="tool-status">${escHtml(statusLabel)}</span>` : ''}
+    ${paramsHtml}
+    ${resultHtml}
+  </div>`;
+}
+
+function renderBubbles(bubbles) {
+  const container = document.getElementById('messages');
+  state.bubbleTextCache = {};
+  container.innerHTML = bubbles.map((b) => {
+    state.bubbleTextCache[b.bubbleId] = b.text + (b.toolCall ? JSON.stringify(b.toolCall) : '');
+    return renderBubbleHtml(b);
+  }).join('');
+}
+
+function patchBubbles(newBubbles) {
+  const container = document.getElementById('messages');
+  const wasAtBottom = isScrolledToBottom(container);
+  let didChange = false;
+
+  for (const b of newBubbles) {
+    const cacheKey = b.text + (b.toolCall ? JSON.stringify(b.toolCall) : '');
+    const existing = container.querySelector(`[data-bubble-id="${CSS.escape(b.bubbleId)}"]`);
+
+    if (existing) {
+      const wasStreaming = existing.classList.contains('streaming');
+      const textChanged = state.bubbleTextCache[b.bubbleId] !== cacheKey;
+      const streamChanged = wasStreaming !== b.isGenerating;
+
+      if (textChanged || streamChanged) {
+        const temp = document.createElement('div');
+        temp.innerHTML = renderBubbleHtml(b);
+        const newEl = temp.firstElementChild;
+        existing.replaceWith(newEl);
+        state.bubbleTextCache[b.bubbleId] = cacheKey;
+        didChange = true;
+      }
+    } else {
+      const div = document.createElement('div');
+      div.innerHTML = renderBubbleHtml(b);
+      container.appendChild(div.firstElementChild);
+      state.bubbleTextCache[b.bubbleId] = cacheKey;
+      didChange = true;
+    }
+  }
+
+  state.bubbles = newBubbles;
+  if (didChange && wasAtBottom) scrollToBottom();
+}
+
 // ── Polling ──
 function startPolling(slug, chatId) {
   stopPolling();
-  state.pollTimer = setInterval(async () => {
+  schedulePoll(slug, chatId);
+}
+
+function schedulePoll(slug, chatId) {
+  const interval = state.isStreaming ? 500 : 2000;
+  state.pollTimer = setTimeout(async () => {
     try {
-      const poll = await API.get(`/projects/${slug}/chats/${chatId}/poll`);
-      if (poll.lastModified > state.lastModified) {
-        state.lastModified = poll.lastModified;
-        const data = await API.get(
-          `/projects/${slug}/chats/${chatId}?since=${state.messageCount}`
-        );
-        if (data.messages.length > 0) {
-          state.messages.push(...data.messages);
-          state.messageCount = state.messages.length;
-          appendMessages(data.messages);
+      const data = await API.get(`/projects/${slug}/chats/${chatId}/live`);
+      const prevSource = state.chatSource;
+      state.chatSource = data.source;
+      state.isStreaming = data.isStreaming || false;
+
+      if (data.source === 'memory' && data.bubbles) {
+        if (prevSource !== 'memory') {
+          state.bubbles = data.bubbles;
+          state.bubbleTextCache = {};
+          renderBubbles(data.bubbles);
+          scrollToBottom();
+        } else {
+          patchBubbles(data.bubbles);
+        }
+      } else if (data.source === 'disk' && data.messages) {
+        if (prevSource === 'memory') {
+          state.messages = data.messages;
+          state.messageCount = data.messages.length;
+          state.lastModified = Date.now();
+          state.bubbles = [];
+          state.bubbleTextCache = {};
+          renderMessages(data.messages);
+          scrollToBottom();
+        } else {
+          const newMsgs = data.messages.slice(state.messageCount);
+          if (newMsgs.length > 0) {
+            state.messages.push(...newMsgs);
+            state.messageCount = state.messages.length;
+            state.lastModified = Date.now();
+            appendMessages(newMsgs);
+          }
         }
       }
     } catch {}
-  }, state.pollInterval);
+
+    if (state.currentView === 'chat') {
+      schedulePoll(slug, chatId);
+    }
+  }, interval);
 }
 
 function stopPolling() {
   if (state.pollTimer) {
-    clearInterval(state.pollTimer);
+    clearTimeout(state.pollTimer);
     state.pollTimer = null;
   }
 }

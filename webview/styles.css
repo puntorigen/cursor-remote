@@ -1064,3 +1064,138 @@ textarea {
   margin-bottom: 8px;
   color: var(--text-dim);
 }
+
+/* ── Streaming / Live Bubbles ── */
+
+@keyframes typingCursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes streamingGlow {
+  0%, 100% { border-color: rgba(59, 130, 246, 0.15); }
+  50% { border-color: rgba(59, 130, 246, 0.35); }
+}
+
+.msg.streaming {
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  animation: streamingGlow 2s ease-in-out infinite, msgIn 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: typingCursor 0.8s step-end infinite;
+}
+
+.typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.typing-indicator::before,
+.typing-indicator::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typingDot 1.4s ease-in-out infinite;
+}
+
+.typing-indicator::before {
+  animation-delay: 0s;
+}
+
+.typing-indicator::after {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingDot {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Tool Call Blocks ── */
+
+.tool-call {
+  margin: 6px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
+
+.tool-call.tool-running {
+  border-left: 3px solid var(--accent);
+}
+
+.tool-call.tool-done {
+  border-left: 3px solid var(--green);
+}
+
+.tool-name {
+  font-weight: 600;
+  color: var(--accent);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.tool-status {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
+}
+
+.tool-done .tool-status {
+  color: var(--green);
+}
+
+.tool-running .tool-status {
+  color: var(--accent);
+}
+
+.tool-details {
+  margin-top: 6px;
+}
+
+.tool-details summary {
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 2px 0;
+}
+
+.tool-details summary:active {
+  color: var(--accent);
+}
+
+.tool-params,
+.tool-result {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: rgba(13, 17, 23, 0.8);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-dim);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
