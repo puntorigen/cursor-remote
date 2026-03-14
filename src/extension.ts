@@ -377,18 +377,18 @@ async function getTunnelUrl(): Promise<string | null> {
   if (local) return local;
   if (isPrimary) return null;
 
-  // Secondary: ask the primary for the tunnel URL
+  // Secondary: ask the primary via the auth-free internal endpoint
   return new Promise((resolve) => {
     const req = http.get(
-      `http://127.0.0.1:${PRIMARY_PORT}/api/status`,
+      `http://127.0.0.1:${PRIMARY_PORT}/api/_tunnel-url`,
       { timeout: 2000 },
       (res) => {
         let data = '';
         res.on('data', (c: Buffer) => { data += c.toString(); });
         res.on('end', () => {
           try {
-            const status = JSON.parse(data);
-            resolve(status.tunnelUrl || null);
+            const parsed = JSON.parse(data);
+            resolve(parsed.tunnelUrl || null);
           } catch { resolve(null); }
         });
       },

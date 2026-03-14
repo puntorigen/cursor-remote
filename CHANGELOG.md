@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.33 — 2026-03-14
+
+### Fix: Secondary windows tunnel URL fetch was blocked by auth
+- The secondary's `getTunnelUrl()` was calling `/api/status` on the primary, which requires authentication. Since each window generates its own random token, the request was rejected with 401.
+- Added a new auth-free internal endpoint `/api/_tunnel-url` (uses the existing `_` prefix convention that skips auth middleware).
+- Secondary windows now correctly show "Show QR Code" and "Copy Public URL" in their menu.
+
 ## v1.0.32 — 2026-03-14
 
 ### Tunnel URL and QR code available on secondary windows

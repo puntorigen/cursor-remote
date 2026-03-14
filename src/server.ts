@@ -349,6 +349,10 @@ export class RemoteServer {
       res.json(this.getRegistry());
     });
 
+    this.app.get('/api/_tunnel-url', (_req, res) => {
+      res.json({ tunnelUrl: this.tunnelUrl });
+    });
+
     this.app.post('/api/_reload', (_req, res) => {
       res.json({ ok: true });
       setTimeout(() => {
