@@ -81,6 +81,18 @@
 
     <!-- Bottom Input Bar -->
     <footer id="inputBar" class="hidden">
+      <div id="modeModelBar" class="mode-model-bar hidden">
+        <div class="mode-selector">
+          <select id="modeSelect" aria-label="Mode">
+            <option value="">Mode...</option>
+          </select>
+        </div>
+        <div class="model-selector">
+          <select id="modelSelect" aria-label="Model">
+            <option value="">Model...</option>
+          </select>
+        </div>
+      </div>
       <div class="input-wrap">
         <textarea id="msgInput" rows="1" placeholder="Send a message to Cursor..." autocomplete="off"></textarea>
         <button id="sendBtn" class="send-btn" aria-label="Send">

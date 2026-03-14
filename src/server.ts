@@ -664,17 +664,13 @@ export class RemoteServer {
 
     this.app.post('/api/send', async (req, res) => {
       try {
-        const { message, composerId, slug } = req.body;
+        const { message, composerId, slug, mode, model } = req.body;
         if (!message || typeof message !== 'string') {
           res.status(400).json({ error: 'message field required' });
           return;
         }
         if (this.maybeProxy(slug, req, res)) return;
 
-        // The web UI sends the transcript chat ID as composerId, but the
-        // injector needs Cursor's internal composer ID.  We resolve the
-        // correct composer on the target window by matching the transcript
-        // ID to live composer state, falling back to the selected composer.
         const resolvedComposerId = composerId
           ? await this.resolveComposerId(composerId)
           : undefined;
@@ -683,9 +679,25 @@ export class RemoteServer {
           `[Server] Message from remote: ${message.slice(0, 80)}...` +
           (composerId ? ` (transcript: ${composerId})` : '') +
           (resolvedComposerId ? ` (resolved composer: ${resolvedComposerId})` : '') +
-          (slug ? ` (slug: ${slug})` : '')
+          (slug ? ` (slug: ${slug})` : '') +
+          (mode ? ` (mode: ${mode})` : '') +
+          (model ? ` (model: ${model})` : '')
         );
-        const result = await this.injector.send(message, resolvedComposerId);
+        const sendOptions: { mode?: string; modelOverride?: string } = {};
+        if (mode) sendOptions.mode = mode;
+        if (model) sendOptions.modelOverride = model;
+        const result = await this.injector.send(message, resolvedComposerId, sendOptions);
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    this.app.get('/api/modes-and-models', async (req, res) => {
+      try {
+        const slug = req.query.slug as string | undefined;
+        if (slug && this.maybeProxy(slug, req, res)) return;
+        const result = await this.injector.getModesAndModels();
         res.json(result);
       } catch (err: any) {
         res.status(500).json({ error: err.message });

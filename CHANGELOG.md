@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.31 — 2026-03-14
+
+### Mode and model selection from the web UI
+- **New**: Select Cursor mode (Agent, Plan, Ask, Debug, Triage, Spec) from the web UI before sending a message.
+- **New**: Select which AI model to use (all models available in your Cursor account) from the web UI.
+- Mode and model selectors appear as compact dropdowns above the message input when viewing a chat.
+- The patcher now discovers and injects two additional services: `composerModesService` and `modelConfigService`.
+- New patched command `cursorRemote._getModesAndModels` returns available modes, models, and current selections.
+- `cursorRemote._submitChat` now accepts optional `mode` and `modelOverride` params — sets mode via `setComposerUnifiedMode` and model via `setModelConfigForComposer` + `modelOverride` option before submitting.
+- New `/api/modes-and-models` endpoint exposes mode/model data to the web UI.
+- `/api/send` now accepts optional `mode` and `model` fields.
+- **Important**: This version requires a patch re-application (happens automatically on reload).
+
 ## v1.0.30 — 2026-03-14
 
 ### Windows elevation for patching protected installations

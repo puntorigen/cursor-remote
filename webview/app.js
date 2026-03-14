@@ -43,6 +43,11 @@ const state = {
   activeWorkspace: null,
   activeWorkspaceName: null,
   projectsData: [],
+  modes: [],
+  models: [],
+  currentMode: 'agent',
+  currentModel: 'default',
+  modesAndModelsLoaded: false,
 };
 
 // ── Markdown setup ──
@@ -99,6 +104,7 @@ function navigate(view, opts = {}) {
       headerTitle.textContent = opts.name || 'Project';
       headerSub.textContent = opts.path || '';
       state.currentProject = opts.slug;
+      state.modesAndModelsLoaded = false;
       const proj = state.projectsData.find((p) => p.slug === opts.slug);
       state.currentProjectClosed = proj ? !proj.hasOpenWindow : false;
       stopPolling();
@@ -111,6 +117,7 @@ function navigate(view, opts = {}) {
       headerSub.textContent = '';
       state.currentChat = opts.id;
       loadChat(state.currentProject, opts.id);
+      fetchModesAndModels();
       break;
     case 'diff':
       headerTitle.textContent = opts.file || 'Diff';
@@ -462,11 +469,75 @@ msgInput.addEventListener('input', () => {
   msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
 });
 
+const modeSelect = document.getElementById('modeSelect');
+const modelSelect = document.getElementById('modelSelect');
+const modeModelBar = document.getElementById('modeModelBar');
+
+const MODE_ICONS = {
+  agent: '\u221E',     // ∞
+  plan: '\u2713',      // ✓
+  chat: '\u{1F4AC}',   // 💬
+  debug: '\u{1F41B}',  // 🐛
+  triage: '\u{1F680}', // 🚀
+  spec: '\u2611',      // ☑
+};
+
+async function fetchModesAndModels() {
+  if (state.modesAndModelsLoaded) return;
+  try {
+    const slug = state.currentProject || undefined;
+    const data = await API.get(`/modes-and-models${slug ? `?slug=${slug}` : ''}`);
+    if (!data.ok) return;
+
+    state.modes = data.modes || [];
+    state.models = data.models || [];
+    state.currentMode = data.currentMode || 'agent';
+    state.currentModel = data.currentModel || 'default';
+    state.modesAndModelsLoaded = true;
+
+    populateModeSelect();
+    populateModelSelect();
+    modeModelBar.classList.remove('hidden');
+  } catch {
+    // Patch may not support this command yet — hide the bar
+  }
+}
+
+function populateModeSelect() {
+  modeSelect.innerHTML = '';
+  const modes = state.modes.length > 0
+    ? state.modes
+    : [{ id: 'agent', name: 'Agent' }, { id: 'plan', name: 'Plan' }, { id: 'chat', name: 'Ask' }];
+  for (const m of modes) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    const icon = MODE_ICONS[m.id] || '';
+    opt.textContent = icon ? `${icon} ${m.name}` : m.name;
+    if (m.id === state.currentMode) opt.selected = true;
+    modeSelect.appendChild(opt);
+  }
+}
+
+function populateModelSelect() {
+  modelSelect.innerHTML = '';
+  const defaultOpt = document.createElement('option');
+  defaultOpt.value = '';
+  defaultOpt.textContent = 'Default model';
+  modelSelect.appendChild(defaultOpt);
+
+  for (const m of state.models) {
+    const opt = document.createElement('option');
+    opt.value = m.name;
+    opt.textContent = m.displayName || m.name;
+    if (m.name === state.currentModel) opt.selected = true;
+    modelSelect.appendChild(opt);
+  }
+}
+
 async function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
 
-  // If the project has no open Cursor window, offer to launch it
   if (state.currentProject && state.currentProjectClosed) {
     const launch = confirm(
       'This project has no open Cursor window.\n\nLaunch Cursor on this project first?'
@@ -487,19 +558,27 @@ async function sendMessage() {
   msgInput.value = '';
   msgInput.style.height = 'auto';
 
+  const selectedMode = modeSelect.value || undefined;
+  const selectedModel = modelSelect.value || undefined;
+
   const container = document.getElementById('messages');
   const msgDiv = document.createElement('div');
   msgDiv.className = 'msg user pending-remote';
-  msgDiv.innerHTML = `<div class="role-label">You (remote)</div>${renderMarkdown(text)}`;
+  const modeLabel = selectedMode && selectedMode !== 'agent' ? ` <span class="mode-badge">${selectedMode}</span>` : '';
+  const modelLabel = selectedModel ? ` <span class="model-badge">${selectedModel}</span>` : '';
+  msgDiv.innerHTML = `<div class="role-label">You (remote)${modeLabel}${modelLabel}</div>${renderMarkdown(text)}`;
   container.appendChild(msgDiv);
   scrollToBottom();
 
   try {
-    const result = await API.post('/send', {
+    const body = {
       message: text,
       slug: state.currentProject || undefined,
       composerId: state.currentChat || undefined,
-    });
+      mode: selectedMode,
+      model: selectedModel,
+    };
+    const result = await API.post('/send', body);
     if (!result.success) {
       showToast(`Failed: ${result.error || 'Unknown error'}`, 'error');
       msgDiv.remove();

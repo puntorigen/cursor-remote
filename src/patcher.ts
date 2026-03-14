@@ -326,18 +326,14 @@ function getGlobalStorageDbPath(): string | null {
 // ─── Dynamic variable discovery ─────────────────────────────────────────────
 
 interface DiscoveredVars {
-  /** Minified name of createDecorator (e.g. "Ti") */
   createDecorator: string;
-  /** Minified name of CommandsRegistry singleton (e.g. "Ss") */
   commandsRegistry: string;
-  /** Minified DI token for composerDataService (e.g. "Oa") */
   composerDataService: string;
-  /** Minified DI token for composerChatService (e.g. "AM") */
   composerChatService: string;
-  /** Minified DI token for composerEventService (e.g. "BA") */
   composerEventService: string;
-  /** Minified DI token for composerViewsService (e.g. "rw") */
   composerViewsService: string;
+  composerModesService: string;
+  modelConfigService: string;
 }
 
 /**
@@ -353,6 +349,8 @@ function discoverVariables(content: string): { vars?: DiscoveredVars; errors: st
     composerChatService:  'composerChatService',
     composerEventService: 'composerEventService',
     composerViewsService: 'composerViewsService',
+    composerModesService: 'composerModesService',
+    modelConfigService:   'modelConfigService',
   };
 
   let createDecoratorName: string | undefined;
@@ -413,6 +411,8 @@ function discoverVariables(content: string): { vars?: DiscoveredVars; errors: st
       composerChatService: tokens.composerChatService,
       composerEventService: tokens.composerEventService,
       composerViewsService: tokens.composerViewsService,
+      composerModesService: tokens.composerModesService,
+      modelConfigService: tokens.modelConfigService,
     },
     errors: [],
   };
@@ -469,10 +469,9 @@ function buildPatchCode(v: DiscoveredVars): string {
   const CS = v.composerChatService;
   const ES = v.composerEventService;
   const VS = v.composerViewsService;
+  const MS = v.composerModesService;
+  const MC = v.modelConfigService;
 
-  // Wait-for-handle logic inlined directly in each command to avoid
-  // any arrow-function-in-comma-expression parsing issues.
-  // showAndFocus activates the tab; poll getHandleIfLoaded up to 2s.
   const waitBlock = (dsVar: string, vsVar: string, idVar: string, hVar: string) => [
     `await ${vsVar}.showAndFocus(${idVar});`,
     `var ${hVar}=${dsVar}.getHandleIfLoaded(${idVar});`,
@@ -486,16 +485,23 @@ function buildPatchCode(v: DiscoveredVars): string {
   return [
     SENTINEL,
 
+    // _submitChat: accepts optional mode + modelOverride
     `${CR}.registerCommand("cursorRemote._submitChat",async(n,e)=>{`,
       `try{`,
         `var t=e.composerId,i=e.text;`,
         `if(!t||!i)return{ok:false,error:"composerId and text required"};`,
-        `var ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES});`,
+        `var ds=n.get(${DS}),cs=n.get(${CS}),vs=n.get(${VS}),es=n.get(${ES}),ms=n.get(${MS}),mc=n.get(${MC});`,
         waitBlock('ds', 'vs', 't', 'h'),
         `if(!h)return{ok:false,error:"composer not found after showAndFocus: "+t};`,
+        // Set mode if requested
+        `if(e.mode){try{ms.setComposerUnifiedMode(h,e.mode)}catch(me){return{ok:false,error:"setMode failed: "+String(me)}}}`,
+        // Set model on the composer if requested
+        `if(e.modelOverride){try{mc.setModelConfigForComposer(h,{modelName:e.modelOverride})}catch(me){}}`,
         `ds.updateComposerData(h,{text:i,richText:i});`,
         `es.fireShouldForceText({composerId:t});`,
-        `await cs.submitChatMaybeAbortCurrent(t,i,{});`,
+        `var opts={};`,
+        `if(e.modelOverride)opts.modelOverride=e.modelOverride;`,
+        `await cs.submitChatMaybeAbortCurrent(t,i,opts);`,
         `return{ok:true,composerId:t};`,
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
@@ -533,6 +539,27 @@ function buildPatchCode(v: DiscoveredVars): string {
           `lastUpdated:c.lastUpdatedAt||0`,
         `}});`,
         `return{ok:true,selectedComposerId:sel,openComposerIds:ids,composers:all};`,
+      `}catch(x){`,
+        `return{ok:false,error:String(x)};`,
+      `}`,
+    `})`,
+
+    `,`,
+
+    // _getModesAndModels: returns available modes and models
+    `${CR}.registerCommand("cursorRemote._getModesAndModels",async(n)=>{`,
+      `try{`,
+        `var ms=n.get(${MS}),mc=n.get(${MC}),ds=n.get(${DS});`,
+        // Get all modes
+        `var modes=[];try{var am=ms.getAllModes();if(am&&am.length){modes=am.map(function(m){return{id:m.id,name:m.name,icon:m.icon||""}})}}catch(me){}`,
+        // Get available models
+        `var models=[];try{var dm=mc.getAvailableDefaultModels();if(dm&&dm.length){models=dm.map(function(m){return{name:m.name,displayName:m.displayName||m.name,defaultOn:!!m.defaultOn}})}}catch(me){}`,
+        // Get current composer's mode and model
+        `var sel=ds.selectedComposerId;`,
+        `var currentMode="agent";var currentModel="default";`,
+        `if(sel){try{currentMode=ms.getComposerUnifiedMode(sel)||"agent"}catch(me){}}`,
+        `if(sel){try{var cfg=mc.getModelConfig("composer");currentModel=cfg.modelName||"default"}catch(me){}}`,
+        `return{ok:true,modes:modes,models:models,currentMode:currentMode,currentModel:currentModel};`,
       `}catch(x){`,
         `return{ok:false,error:String(x)};`,
       `}`,
@@ -992,7 +1019,9 @@ export async function applyPatch(log: vscode.OutputChannel): Promise<PatchStatus
     + `DataService=${vars.composerDataService}, `
     + `ChatService=${vars.composerChatService}, `
     + `EventService=${vars.composerEventService}, `
-    + `ViewsService=${vars.composerViewsService}`,
+    + `ViewsService=${vars.composerViewsService}, `
+    + `ModesService=${vars.composerModesService}, `
+    + `ModelConfigService=${vars.modelConfigService}`,
   );
 
   log.appendLine('[Patcher] Locating injection point...');

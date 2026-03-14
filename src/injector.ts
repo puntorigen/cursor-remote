@@ -39,6 +39,27 @@ export interface DiagnosticResult {
   recommendation: string;
 }
 
+export interface ModeInfo {
+  id: string;
+  name: string;
+  icon: string;
+}
+
+export interface ModelInfo {
+  name: string;
+  displayName: string;
+  defaultOn: boolean;
+}
+
+export interface ModesAndModelsResult {
+  ok: boolean;
+  modes?: ModeInfo[];
+  models?: ModelInfo[];
+  currentMode?: string;
+  currentModel?: string;
+  error?: string;
+}
+
 export class MessageInjector {
   private lastMethod: InjectionMethod = 'none';
   private patchAvailable = false;
@@ -128,16 +149,30 @@ export class MessageInjector {
     };
   }
 
-  /**
-   * Send a message to Cursor's chat using patched internal commands.
-   *
-   * If composerId is provided, submits to that specific conversation.
-   * Otherwise, submits to the currently selected/focused composer.
-   */
-  async send(message: string, composerId?: string): Promise<InjectionResult> {
+  async getModesAndModels(): Promise<ModesAndModelsResult> {
+    if (!this.patchAvailable) {
+      return { ok: false, error: 'Patch not applied' };
+    }
+    try {
+      const result = await vscode.commands.executeCommand<ModesAndModelsResult>(
+        'cursorRemote._getModesAndModels',
+      );
+      return result ?? { ok: false, error: 'No response from _getModesAndModels' };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async send(
+    message: string,
+    composerId?: string,
+    options?: { mode?: string; modelOverride?: string },
+  ): Promise<InjectionResult> {
     this.log.appendLine(
       `[Injector] Sending (${message.length} chars)` +
-      (composerId ? ` to ${composerId}` : ' to active composer')
+      (composerId ? ` to ${composerId}` : ' to active composer') +
+      (options?.mode ? ` mode=${options.mode}` : '') +
+      (options?.modelOverride ? ` model=${options.modelOverride}` : '')
     );
 
     if (!this.patchAvailable) {
@@ -145,7 +180,6 @@ export class MessageInjector {
       return this.strategyClipboard(message);
     }
 
-    // Resolve composerId if not provided
     if (!composerId) {
       const state = await this.getComposerState();
       composerId = state.selectedComposerId ?? undefined;
@@ -160,7 +194,7 @@ export class MessageInjector {
       this.log.appendLine(`[Injector] Using active composer: ${composerId}`);
     }
 
-    return this.strategyPatchedSubmit(message, composerId);
+    return this.strategyPatchedSubmit(message, composerId, options);
   }
 
   /**
@@ -220,13 +254,18 @@ export class MessageInjector {
   private async strategyPatchedSubmit(
     message: string,
     composerId: string,
+    options?: { mode?: string; modelOverride?: string },
   ): Promise<InjectionResult> {
     try {
       this.log.appendLine(`[Injector] Submitting via cursorRemote._submitChat`);
 
+      const params: Record<string, string> = { composerId, text: message };
+      if (options?.mode) params.mode = options.mode;
+      if (options?.modelOverride) params.modelOverride = options.modelOverride;
+
       const result = await vscode.commands.executeCommand<{ ok: boolean; composerId?: string; error?: string }>(
         'cursorRemote._submitChat',
-        { composerId, text: message },
+        params,
       );
 
       if (result?.ok) {

@@ -590,6 +590,68 @@ footer {
   flex-shrink: 0;
 }
 
+.mode-model-bar {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px 6px;
+}
+
+.mode-model-bar.hidden {
+  display: none;
+}
+
+.mode-selector, .model-selector {
+  flex: 1;
+}
+
+.mode-model-bar select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 28px 6px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: inherit;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+}
+
+.mode-model-bar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mode-model-bar select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.mode-badge, .model-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-weight: 500;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.mode-badge {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+}
+
+.model-badge {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
 .input-wrap {
   display: flex;
   align-items: flex-end;
