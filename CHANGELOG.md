@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.37 — 2026-03-14
+
+### Structured JSON queries
+- **New**: `POST /api/query/json` — send a prompt with a JSON schema; the endpoint wraps the prompt with schema instructions, parses the model's response, and retries automatically (up to 3 extra attempts) if JSON parsing fails.
+- Returns `{ok, data, raw}` on success where `data` is the parsed JSON object.
+- Strips markdown fences if the model wraps the JSON in code blocks.
+- Added `API.md` with complete documentation for all endpoints.
+
 ## v1.0.36 — 2026-03-14
 
 ### Programmatic LLM access via Cursor internals

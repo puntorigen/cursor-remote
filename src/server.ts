@@ -744,6 +744,25 @@ export class RemoteServer {
       }
     });
 
+    this.app.post('/api/query/json', async (req, res) => {
+      try {
+        const { prompt, schema, model, retries, slug } = req.body;
+        if (!prompt || typeof prompt !== 'string') {
+          res.status(400).json({ ok: false, error: 'prompt is required' });
+          return;
+        }
+        if (!schema || typeof schema !== 'object') {
+          res.status(400).json({ ok: false, error: 'schema is required (JSON object)' });
+          return;
+        }
+        if (slug && this.maybeProxy(slug, req, res)) return;
+        const result = await this.injector.queryJson(prompt, schema, { model, retries });
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
     this.app.get('/api/diagnostics', async (_req, res) => {
       try {
         this.log.appendLine('[Server] Running safe diagnostics (read-only)...');

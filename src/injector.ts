@@ -281,6 +281,53 @@ export class MessageInjector {
     }
   }
 
+  async queryJson<T = unknown>(
+    prompt: string,
+    schema: Record<string, unknown>,
+    options?: { model?: string; retries?: number },
+  ): Promise<{ ok: boolean; data?: T; raw?: string; error?: string }> {
+    const maxAttempts = Math.min(options?.retries ?? 1, 3) + 1;
+    const schemaStr = JSON.stringify(schema, null, 2);
+    const wrappedPrompt = [
+      prompt,
+      '',
+      'Respond ONLY with valid JSON matching this exact schema (no markdown fences, no extra text):',
+      schemaStr,
+    ].join('\n');
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const retryHint = attempt > 1
+        ? `\n\nIMPORTANT: Your previous response was not valid JSON. Respond with ONLY the raw JSON object, nothing else.`
+        : '';
+
+      const r = await this.query(wrappedPrompt + retryHint, options?.model);
+      if (!r.ok) return { ok: false, error: r.error };
+
+      const raw = (r.result || '').trim();
+
+      // Strip markdown fences if the model wrapped it anyway
+      const cleaned = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+      try {
+        const data = JSON.parse(cleaned) as T;
+        return { ok: true, data, raw: cleaned };
+      } catch (parseErr: any) {
+        if (attempt === maxAttempts) {
+          return {
+            ok: false,
+            raw,
+            error: `JSON parse failed after ${maxAttempts} attempt(s): ${parseErr.message}`,
+          };
+        }
+        this.log.appendLine(
+          `[Injector] queryJson attempt ${attempt}/${maxAttempts} failed to parse — retrying`,
+        );
+      }
+    }
+
+    return { ok: false, error: 'Unexpected: all attempts exhausted' };
+  }
+
   private async strategyPatchedSubmit(
     message: string,
     composerId: string,
