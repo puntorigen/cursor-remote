@@ -510,16 +510,31 @@ async function loadChat(slug, chatId) {
   container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading conversation...</div>';
 
   try {
-    const data = await API.get(`/projects/${slug}/chats/${chatId}/live`);
-    state.chatSource = data.source;
-    state.isStreaming = data.isStreaming || false;
+    let data;
+    try {
+      data = await API.get(`/projects/${slug}/chats/${chatId}/live`);
+    } catch {
+      data = null;
+    }
 
-    if (data.source === 'memory' && data.bubbles) {
+    const useBubbles = data && data.source === 'memory' && data.bubbles && data.bubbles.length > 0;
+
+    if (useBubbles) {
+      state.chatSource = 'memory';
+      state.isStreaming = data.isStreaming || false;
       state.bubbles = data.bubbles;
       state.bubbleTextCache = {};
       renderBubbles(data.bubbles);
     } else {
-      state.messages = data.messages || [];
+      state.chatSource = 'disk';
+      state.isStreaming = false;
+      const diskMessages = (data && data.messages) || [];
+      if (diskMessages.length === 0) {
+        const fallback = await API.get(`/projects/${slug}/chats/${chatId}`);
+        state.messages = fallback.messages || [];
+      } else {
+        state.messages = diskMessages;
+      }
       state.messageCount = state.messages.length;
       state.lastModified = Date.now();
       state.bubbles = [];

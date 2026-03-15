@@ -518,17 +518,42 @@ export class RemoteServer {
       try {
         const chatId = req.params.id;
         const slug = req.params.slug;
-        const conv = await this.injector.getConversation(chatId);
 
-        if (conv.ok && conv.loaded) {
+        let conv;
+        try {
+          conv = await this.injector.getConversation(chatId);
+        } catch {
+          conv = { ok: false };
+        }
+
+        const hasBubbles = conv.ok && conv.loaded && conv.bubbles && conv.bubbles.length > 0;
+        const hasAiBubble = hasBubbles && conv.bubbles!.some((b: any) => b.type === 'ai');
+
+        if (hasBubbles && hasAiBubble) {
+          this.log.appendLine(
+            `[Server] /live ${chatId.slice(0, 8)}… → memory (${conv.bubbles!.length} bubbles, streaming=${conv.isStreaming})`
+          );
           res.json({
             source: 'memory',
             isStreaming: conv.isStreaming ?? false,
             composerId: chatId,
-            bubbles: conv.bubbles ?? [],
+            bubbles: conv.bubbles,
+          });
+        } else if (hasBubbles && conv.isStreaming) {
+          this.log.appendLine(
+            `[Server] /live ${chatId.slice(0, 8)}… → memory-streaming (${conv.bubbles!.length} bubbles, no AI yet)`
+          );
+          res.json({
+            source: 'memory',
+            isStreaming: true,
+            composerId: chatId,
+            bubbles: conv.bubbles,
           });
         } else {
           const messages = getChat(slug, chatId);
+          this.log.appendLine(
+            `[Server] /live ${chatId.slice(0, 8)}… → disk (${messages.length} messages, conv=${conv.ok ? 'loaded-empty' : conv.error || 'not-loaded'})`
+          );
           res.json({
             source: 'disk',
             isStreaming: false,
@@ -537,6 +562,7 @@ export class RemoteServer {
           });
         }
       } catch (err: any) {
+        this.log.appendLine(`[Server] /live error: ${err.message}`);
         res.status(500).json({ error: err.message });
       }
     });

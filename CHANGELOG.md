@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.41 — 2026-03-14
+
+### Live data resilience fixes
+- **Server**: `/live` endpoint now validates that memory bubbles contain at least one AI response before using them; falls back to disk otherwise. Added diagnostic logging.
+- **Frontend**: `loadChat()` now falls back to the original `/chats/:id` endpoint if `/live` returns empty data from both memory and disk paths.
+- **Frontend**: Extra `try/catch` around the `/live` call so any network or parse error gracefully degrades to disk.
+- **Server**: Streaming-only conversations (user just sent a message, no AI bubble yet) are still served from memory with `isStreaming: true`.
+
 ## v1.0.40 — 2026-03-14
 
 ### Live-primary chat data
