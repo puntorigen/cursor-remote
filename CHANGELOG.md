@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.42 — 2026-03-19
+
+### Fix _getConversation handle resolution
+- **Patch**: `_getConversation` now tries three handle resolution methods: `getHandleIfLoaded`, `getHandleIfLoaded_MIGRATED`, and `getComposerHandleById`. Falls back through each if the previous returns null.
+- **Patch**: Also tries `getComposerData(handle).conversation` as a fallback for `getLoadedConversation`.
+- **Patch**: Returns debug diagnostics (which methods were tried, sample composer IDs) when handle resolution fails, enabling remote troubleshooting.
+- **Server**: `/live` endpoint now logs detailed debug info including the handle resolution path taken.
+
 ## v1.0.41 — 2026-03-14
 
 ### Live data resilience fixes

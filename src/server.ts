@@ -527,9 +527,11 @@ export class RemoteServer {
         }
 
         const hasBubbles = conv.ok && conv.loaded && conv.bubbles && conv.bubbles.length > 0;
-        const hasAiBubble = hasBubbles && conv.bubbles!.some((b: any) => b.type === 'ai');
+        const hasAiContent = hasBubbles && conv.bubbles!.some(
+          (b: any) => b.type === 'ai' && (b.text || b.toolCall || b.isGenerating),
+        );
 
-        if (hasBubbles && hasAiBubble) {
+        if (hasBubbles && hasAiContent) {
           this.log.appendLine(
             `[Server] /live ${chatId.slice(0, 8)}… → memory (${conv.bubbles!.length} bubbles, streaming=${conv.isStreaming})`
           );
@@ -551,8 +553,14 @@ export class RemoteServer {
           });
         } else {
           const messages = getChat(slug, chatId);
+          const debugInfo = (conv as any)?.debug ? ` [${(conv as any).debug}, tried=${JSON.stringify((conv as any).tried || [])}, sampleIds=${JSON.stringify((conv as any).sampleIds || [])}]` : '';
+          const reason = !conv.ok ? (conv.error || 'not-loaded')
+            : !conv.loaded ? `not-in-memory${debugInfo}`
+            : !hasBubbles ? 'no-bubbles'
+            : !hasAiContent ? `no-ai-content(${conv.bubbles!.length} bubbles, types: ${conv.bubbles!.map((b: any) => b.type).join(',')})`
+            : 'unknown';
           this.log.appendLine(
-            `[Server] /live ${chatId.slice(0, 8)}… → disk (${messages.length} messages, conv=${conv.ok ? 'loaded-empty' : conv.error || 'not-loaded'})`
+            `[Server] /live ${chatId.slice(0, 8)}… → disk (${messages.length} messages, reason=${reason})`
           );
           res.json({
             source: 'disk',
